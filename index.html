@@ -5,12 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#062A49">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" type="image/png" href="icons/favicon-64.png">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="UNIVO">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>UNIVO — Gestion, factures et reçus</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1183,6 +1184,8 @@ function pwaInit() {
   if (ios && !S.standalone) { S.ios = true; S.canInstall = true; }
   if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
     navigator.serviceWorker.register("sw.js").catch(() => {});
+    Promise.all(["manifest.webmanifest", "icon-192.png", "icon-512.png"].map((f) => fetch(f, { cache: "no-store" }).then((r) => (r.ok ? null : f)).catch(() => f)))
+      .then((miss) => { miss = miss.filter(Boolean); if (miss.length) { S.note = "Fichiers absents du site : " + miss.join(", ") + ". Déposez-les à côté de index.html pour que le logo s'affiche sur l'icône de l'application."; render(); } });
   }
   window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); INSTALL = e; S.canInstall = true; render(); });
   window.addEventListener("appinstalled", () => { INSTALL = null; S.canInstall = false; render(); toast("UNIVO est installée sur cet appareil."); });
