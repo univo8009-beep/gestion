@@ -12,6 +12,10 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="UNIVO">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
 <title>UNIVO — Gestion, factures et reçus</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -252,6 +256,15 @@ tbody tr:hover{background:var(--wash)}
 .doc-pay .t{font-weight:600; margin-bottom:4px}
 .doc-legal{padding:22px 34px 0 40px; font-size:10.5px; color:var(--dmuted); line-height:1.6}
 
+.login{position:fixed; inset:0; z-index:90; background:var(--wash); display:flex; align-items:center; justify-content:center; padding:20px}
+.login[hidden]{display:none}
+.login-card{background:var(--paper); border:1px solid var(--line); border-top:3px solid var(--orange); border-radius:6px; padding:28px 26px; width:min(380px,100%); display:flex; flex-direction:column; gap:12px; margin:0}
+.login-card img{width:190px; max-width:70%; align-self:center; margin-bottom:6px}
+.login-card h2{font-size:19px}
+.login-err{color:#C0392B; font-size:13px}
+.login-err:empty{display:none}
+.login-ok{color:var(--good); font-size:13px}
+.login-ok:empty{display:none}
 @media (max-width:980px){
   .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
   .kpi:nth-child(3){border-left:0}
@@ -455,22 +468,61 @@ function lload() {
   if (!D.settings) D.settings = Object.assign({}, AG_DEF);
   if (!D.services.length) D.services = SRV_DEF.map((s) => Object.assign({}, s));
 }
-async function put(col, id, data) {
-  const body = Object.assign({}, data); delete body.id;
-  if (S.db) { try { await S.db.collection(col).doc(id).set(body); } catch (e) { erreur(e); throw e; } return; }
-  const arr = D[col], i = arr.findIndex((x) => x.id === id);
-  const rec = Object.assign({ id: id }, body);
+function upsertLocal(col, id, body) {
+  const arr = D[col], i = arr.findIndex((x) => x.id === id), rec = Object.assign({ id: id }, body);
   if (i < 0) arr.push(rec); else arr[i] = rec;
+}
+async function put(col, id, data) {
+  const body = JSON.parse(JSON.stringify(data)); delete body.id;
+  upsertLocal(col, id, body);
+  if (S.db) {
+    const p = S.db.collection(col).doc(id).set(body);
+    if (S.fb) { p.catch(erreur); return; }          /* Firestore : écrit aussi hors connexion */
+    try { await p; } catch (e) { erreur(e); throw e; }
+    return;
+  }
   lsave(); render();
 }
 async function drop(col, id) {
-  if (S.db) { try { await S.db.collection(col).doc(id).delete(); } catch (e) { erreur(e); throw e; } return; }
-  D[col] = D[col].filter((x) => x.id !== id); lsave(); render();
+  D[col] = D[col].filter((x) => x.id !== id);
+  if (S.db) {
+    const p = S.db.collection(col).doc(id).delete();
+    if (S.fb) { p.catch(erreur); return; }
+    try { await p; } catch (e) { erreur(e); throw e; }
+    return;
+  }
+  lsave(); render();
 }
 async function putAg(obj) {
-  const body = Object.assign({}, obj);
-  if (S.db) { try { await S.db.doc("settings/agence").set(body); } catch (e) { erreur(e); throw e; } return; }
-  D.settings = body; lsave(); render();
+  const body = JSON.parse(JSON.stringify(obj));
+  D.settings = body;
+  if (S.db) {
+    const p = S.db.doc("settings/agence").set(body);
+    if (S.fb) { p.catch(erreur); return; }
+    try { await p; } catch (e) { erreur(e); throw e; }
+    return;
+  }
+  lsave(); render();
+}
+const delai = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("delai")), ms))]);
+/* numérotation sûre à plusieurs postes : compteur Firestore en transaction, repli local hors connexion */
+async function numeroSur(kind) {
+  const loc = numero(kind);
+  if (!S.fb || !S.db || !navigator.onLine) return loc;
+  const a = ag(), yr = new Date().getFullYear();
+  const pref = kind === "fac" ? (a.prefFac || "FAC") : (a.prefRec || "REC");
+  const localMax = parseInt(loc.split("-").pop(), 10) - 1;
+  const ref = S.db.doc("compteurs/" + kind + "-" + yr);
+  try {
+    const n = await delai(S.db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const cur = snap.exists ? num((snap.data() || {}).n) : 0;
+      const nx = Math.max(cur, localMax) + 1;
+      tx.set(ref, { n: nx });
+      return nx;
+    }), 7000);
+    return pref + "-" + yr + "-" + String(n).padStart(4, "0");
+  } catch (e) { return loc; }
 }
 async function blobSave(req) {
   const blob = (typeof Blob !== "undefined" && req.data instanceof Blob) ? req.data : new Blob([req.data], { type: "application/octet-stream" });
@@ -483,7 +535,8 @@ async function blobSave(req) {
 }
 function erreur(e) {
   const c = e && e.code;
-  if (c === "invalid_argument" && !S.ro) { S.ro = true; S.note = "Votre accès est en lecture seule : les enregistrements ne sont pas conservés."; }
+  if (c === "permission-denied") { S.ro = true; S.note = "Ce compte n'est pas autorisé à enregistrer. Ajoutez son adresse e-mail dans les règles Firestore."; }
+  else if (c === "invalid_argument" && !S.ro) { S.ro = true; S.note = "Votre accès est en lecture seule : les enregistrements ne sont pas conservés."; }
   else if (c === "quota_exceeded") S.note = "La base de cette application est pleine. Supprimez d'anciens documents avant d'en créer de nouveaux.";
   else if (c === "revoked") S.note = "L'accès aux données a été interrompu. Rechargez la page.";
   toast("Enregistrement impossible" + (c ? " (" + c + ")" : "") + ".");
@@ -491,27 +544,74 @@ function erreur(e) {
 }
 /* ---------- amorçage ---------- */
 const COLS = ["clients", "services", "factures", "recus"];
+const UNSUB = [];
+function desabonner() { UNSUB.splice(0).forEach((u) => { try { if (typeof u === "function") u(); } catch (e) {} }); }
+function abonner(db) {
+  desabonner();
+  let seeded = false;
+  const errSnap = (c) => (e) => {
+    S.note = e && (e.code === "permission-denied" || e.code === "invalid_argument")
+      ? "Ce compte n'a pas accès aux données. Ajoutez son adresse e-mail dans les règles Firestore."
+      : "Synchronisation de « " + c + " » interrompue. Rechargez la page.";
+    render();
+  };
+  UNSUB.push(db.doc("settings/agence").onSnapshot((s) => {
+    D.settings = s.exists ? s.data() : null;
+    if (S.fb && !s.exists && !(s.metadata && s.metadata.fromCache)) db.doc("settings/agence").set(Object.assign({}, AG_DEF)).catch(() => {});
+    render();
+  }, errSnap("réglages")));
+  COLS.forEach((c) => {
+    UNSUB.push(db.collection(c).onSnapshot((snap) => {
+      D[c] = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+      if (S.fb && c === "services" && !D.services.length && !seeded && !(snap.metadata && snap.metadata.fromCache)) {
+        seeded = true;
+        const bt = db.batch();
+        SRV_DEF.forEach((x) => { const o = Object.assign({}, x); delete o.id; bt.set(db.collection("services").doc(x.id), o); });
+        bt.commit().catch(() => {});
+      }
+      render();
+    }, errSnap(c)));
+  });
+}
 async function boot() {
   render();
-  if (!CL) { S.local = true; lload(); S.dl = { save: blobSave }; pwaInit(); S.note = "Données enregistrées sur ce poste, dans ce navigateur. Faites une sauvegarde JSON de temps en temps depuis Réglages."; render(); return; }
-  const db = await CL.use("db");
-  if (!db) { S.local = true; lload(); S.note = "Enregistrement partagé indisponible : les données restent dans ce navigateur uniquement."; render(); return; }
-  S.db = db;
-  db.doc("settings/agence").onSnapshot(
-    (s) => { D.settings = s.exists ? s.data() : null; render(); },
-    (e) => { S.note = "Lecture des réglages interrompue."; render(); }
-  );
-  COLS.forEach((c) => {
-    db.collection(c).onSnapshot(
-      (snap) => { D[c] = snap.docs.map((d) => Object.assign({ id: d.id }, d.data())); render(); },
-      (e) => { S.note = "Synchronisation de « " + c + " » interrompue. Rechargez la page."; render(); }
-    );
+  if (CL) {
+    const db = await CL.use("db");
+    if (!db) { S.local = true; lload(); S.note = "Enregistrement partagé indisponible : les données restent dans ce navigateur uniquement."; render(); return; }
+    S.db = db; abonner(db);
+    CL.use("user").then((u) => {
+      if (!u) return;
+      Promise.resolve(u.can ? u.can("data.write") : null).then((w) => { if (w === false) { S.ro = true; S.note = "Accès en lecture seule : vous pouvez consulter et imprimer, pas enregistrer."; render(); } }).catch(() => {});
+    }).catch(() => {});
+    CL.use("downloads").then((d) => { S.dl = d; render(); }).catch(() => {});
+    return;
+  }
+  S.dl = { save: blobSave };
+  pwaInit();
+  const cfg = window.UNIVO_FIREBASE;
+  const cfgOk = !!(cfg && cfg.apiKey && cfg.projectId && !/COLLEZ/i.test(cfg.apiKey));
+  if (cfgOk && window.firebase) { fbBoot(cfg); return; }
+  if (cfgOk) { showLogin("offline"); return; }
+  S.local = true; lload();
+  S.note = "Firestore n'est pas encore configuré : données enregistrées sur ce poste uniquement. Remplissez le fichier firebase-config.js.";
+  render();
+}
+function fbBoot(cfg) {
+  S.fb = true;
+  try { firebase.initializeApp(cfg); } catch (e) {}
+  const fs = firebase.firestore();
+  try { const p = fs.enablePersistence({ synchronizeTabs: true }); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+  showLogin("wait");
+  firebase.auth().onAuthStateChanged((u) => {
+    if (!u) {
+      S.user = null; S.db = null; desabonner();
+      COLS.forEach((c) => { D[c] = []; }); D.settings = null;
+      S.view = "dash"; S.draft = null; closeSheet();
+      showLogin(); render(true); return;
+    }
+    S.user = u; S.db = fs; S.ro = false; S.note = "";
+    hideLogin(); abonner(fs); render(true);
   });
-  CL.use("user").then((u) => {
-    if (!u) return;
-    Promise.resolve(u.can ? u.can("data.write") : null).then((w) => { if (w === false) { S.ro = true; S.note = "Accès en lecture seule : vous pouvez consulter et imprimer, pas enregistrer."; render(); } }).catch(() => {});
-  }).catch(() => {});
-  CL.use("downloads").then((d) => { S.dl = d; render(); }).catch(() => {});
 }
 
 /* ---------- châssis ---------- */
@@ -533,7 +633,8 @@ function render(force) {
   nav.innerHTML = NAV.map(([k, l, i]) => '<button class="nav-b" data-act="go:' + k + '"' + (S.view === k || (k === "factures" && (S.view === "edit" || S.view === "doc")) ? ' aria-current="page"' : "") + '><span class="ic">' + i + "</span>" + l + "</button>").join("");
   const a = ag();
   $("#railLogo").src = LOGO;
-  $("#railFoot").innerHTML = "<strong>" + esc(a.nom) + "</strong>" + esc(a.raison || "") + "<div>" + esc(a.tel || "") + "</div><div>" + esc(a.email || "") + "</div>";
+  $("#railFoot").innerHTML = "<strong>" + esc(a.nom) + "</strong>" + esc(a.raison || "") + "<div>" + esc(a.tel || "") + "</div><div>" + esc(a.email || "") + "</div>"
+    + (S.fb && S.user ? '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--rail-line)">' + esc(S.user.email || "") + '<br><button class="btn btn-q" data-act="logout" style="color:#fff;padding:4px 0">Se déconnecter</button></div>' : "");
   const [t, sub] = TITRES[S.view] || TITRES.dash;
   $("#top").innerHTML = '<div><h1>' + esc(t) + '</h1><div class="sub">' + esc(sub) + "</div></div>" + '<div class="top-act">' + topActions() + "</div>";
   $("#work").innerHTML = (S.note ? '<div class="notice noprint"><span>◆</span><div>' + esc(S.note) + "</div></div>" : "") + (VIEWS[S.view] || VIEWS.dash)();
@@ -843,8 +944,9 @@ VIEWS.reglages = function () {
     + ta("Conditions", "conditions") + ta("Moyens de paiement acceptés", "paiement") + "</div></div></div>"
     + (S.ro ? "" : '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-p" data-act="save-ag">Enregistrer les réglages</button></div>')
     + '<div class="panel"><div class="panel-h"><h3>Données</h3></div><div class="panel-b sub2">' + D.clients.length + " client(s) · " + D.factures.length + " facture(s) · " + D.recus.length + " reçu(s) · " + D.services.length + " prestation(s)."
-    + (S.local ? " Ces données sont conservées dans ce navigateur." : " Ces données sont enregistrées avec l'application et visibles par les personnes qui y ont accès.")
-    + '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">' + (S.dl ? '<button class="btn" data-act="export">Exporter en CSV</button><button class="btn" data-act="bk-json">Sauvegarde JSON</button>' : "") + (S.local ? '<button class="btn" data-act="restore">Restaurer une sauvegarde</button>' : "") + "</div></div></div>"
+    + (S.fb ? " Ces données sont enregistrées dans Firestore et partagées entre tous les postes connectés, même hors connexion (synchronisation au retour du réseau)." : S.local ? " Ces données sont conservées dans ce navigateur." : " Ces données sont enregistrées avec l'application et visibles par les personnes qui y ont accès.")
+    + '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">' + (S.dl ? '<button class="btn" data-act="export">Exporter en CSV</button><button class="btn" data-act="bk-json">Sauvegarde JSON</button>' : "") + (S.local || S.fb ? '<button class="btn" data-act="restore">' + (S.fb ? "Importer une sauvegarde JSON" : "Restaurer une sauvegarde") + "</button>" : "") + (S.fb && hasLocal() ? '<button class="btn btn-o" data-act="push-local">Envoyer les données de ce poste en ligne</button>' : "") + "</div></div></div>"
+    + (S.fb && S.user ? '<div class="panel"><div class="panel-h"><h3>Compte</h3></div><div class="panel-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span>Connecté : <strong>' + esc(S.user.email || "") + '</strong></span><button class="btn" data-act="logout">Se déconnecter</button></div></div>' : "")
     + "</div>";
 };
 
@@ -1016,7 +1118,7 @@ const ACT = {
     if (!f.client.nom.trim()) { toast("Indiquez le nom du client."); return; }
     f.lignes = f.lignes.filter((l) => String(l.libelle || "").trim() || num(l.pu) || num(l.ps));
     if (!f.lignes.length) { toast("Ajoutez au moins une prestation."); return; }
-    if (!D.factures.some((x) => x.id === f.id) && D.factures.some((x) => x.numero === f.numero)) f.numero = numero("fac");
+    if (!D.factures.some((x) => x.id === f.id)) f.numero = await numeroSur("fac");
     if (!f.clientId) {
       const id = uid();
       await put("clients", id, snapCli(f.client));
@@ -1063,15 +1165,15 @@ const ACT = {
   "ok-pay": async (fid) => {
     const f = D.factures.find((x) => x.id === fid); if (!f) return;
     const mt = num(val("p_mt")); if (mt <= 0) { toast("Indiquez le montant reçu."); return; }
-    const rid = uid();
+    const pd = val("p_date"), pm = val("p_mode"), pr = val("p_ref"), pn = val("p_note");
+    const rid = uid(), no = await numeroSur("rec");
     const body = {
-      numero: numero("rec"), date: val("p_date") || today(), montant: mt, devise: f.devise,
-      mode: val("p_mode"), reference: val("p_ref"), note: val("p_note"),
+      numero: no, date: pd || today(), montant: mt, devise: f.devise,
+      mode: pm, reference: pr, note: pn,
       factureId: f.id, factureNumero: f.numero, objet: "Règlement de la facture " + f.numero,
       client: Object.assign({}, cliOf(f)), createdAt: new Date().toISOString()
     };
     try { await put("recus", rid, body); } catch (e) { return; }
-    if (S.db) D.recus.push(Object.assign({ id: rid }, body));
     closeSheet(); openDoc("rec", rid); toast("Reçu " + body.numero + " établi.");
   },
   "new-rec": () => modalRecu(),
@@ -1081,9 +1183,9 @@ const ACT = {
     const f = fid ? D.factures.find((x) => x.id === fid) : null;
     const nom = val("r_nom") || (f ? cliOf(f).nom : "");
     if (!nom) { toast("Indiquez le client."); return; }
-    const rid = uid();
+    const rid = uid(), no = await numeroSur("rec");
     const body = {
-      numero: numero("rec"), date: val("r_date") || today(), montant: mt, devise: f ? f.devise : val("r_dev"),
+      numero: no, date: val("r_date") || today(), montant: mt, devise: f ? f.devise : val("r_dev"),
       mode: val("r_mode"), reference: val("r_ref"), objet: val("r_obj") || (f ? "Règlement de la facture " + f.numero : "Versement"),
       factureId: f ? f.id : "", factureNumero: f ? f.numero : "",
       client: f ? Object.assign({}, cliOf(f), val("r_tel") ? { tel: val("r_tel") } : {}) : { nom: nom, tel: val("r_tel") },
@@ -1091,7 +1193,6 @@ const ACT = {
     };
     if (!f) body.client.nom = nom;
     try { await put("recus", rid, body); } catch (e) { return; }
-    if (S.db) D.recus.push(Object.assign({ id: rid }, body));
     closeSheet(); openDoc("rec", rid); toast("Reçu " + body.numero + " établi.");
   },
   "del-fac": (id) => {
@@ -1170,11 +1271,80 @@ ACT["ok-autre"] = (i) => {
 
 function loadBackup(o) {
   if (!o || typeof o !== "object") { toast("Fichier illisible."); return; }
+  if (S.fb) { envoyerTout(o); return; }
   if (o.settings) D.settings = o.settings;
   ["clients", "services", "factures", "recus"].forEach((c) => { if (Array.isArray(o[c])) D[c] = o[c]; });
   lsave(); render(true);
   toast("Sauvegarde restaurée : " + D.factures.length + " facture(s), " + D.recus.length + " reçu(s).");
 }
+
+/* ---------- Firestore : connexion, transfert ---------- */
+function lireLocal() { try { return JSON.parse(localStorage.getItem(LKEY) || "null"); } catch (e) { return null; } }
+function hasLocal() { const o = lireLocal(); return !!(o && ((o.factures || []).length || (o.recus || []).length || (o.clients || []).length)); }
+function envoyerTout(o) {
+  if (!S.db || !S.fb) return;
+  const ops = [];
+  if (o.settings) ops.push(["settings", "agence", o.settings]);
+  ["clients", "services", "factures", "recus"].forEach((c) => (o[c] || []).forEach((x) => {
+    if (x && x.id) { const b = JSON.parse(JSON.stringify(x)); delete b.id; ops.push([c, String(x.id), b]); }
+  }));
+  if (!ops.length) { toast("Aucune donnée à envoyer."); return; }
+  for (let i = 0; i < ops.length; i += 400) {
+    const bt = S.db.batch();
+    ops.slice(i, i + 400).forEach((op) => bt.set(op[0] === "settings" ? S.db.doc("settings/agence") : S.db.collection(op[0]).doc(op[1]), op[2]));
+    bt.commit().catch(erreur);
+  }
+  toast(ops.length + " élément(s) envoyés vers la base en ligne.");
+}
+ACT["push-local"] = () => {
+  const o = lireLocal() || {};
+  modalConfirm("Envoyer les données de ce poste ?", (o.factures || []).length + " facture(s), " + (o.recus || []).length + " reçu(s) et " + (o.clients || []).length + " client(s) enregistrés sur ce poste seront copiés dans la base partagée. Les documents portant le même identifiant seront remplacés.", "do-push-local");
+};
+ACT["do-push-local"] = () => { closeSheet(); envoyerTout(lireLocal() || {}); };
+ACT.logout = () => { try { firebase.auth().signOut(); } catch (e) {} };
+
+function showLogin(mode) {
+  let el = document.getElementById("login");
+  if (!el) { el = document.createElement("div"); el.id = "login"; el.className = "login"; document.body.appendChild(el); }
+  el.hidden = false;
+  const img = '<img src="' + LOGO + '" alt="UNIVO Voyages &amp; Services">';
+  if (mode === "wait") { el.innerHTML = '<div class="login-card">' + img + '<div class="sub2" style="text-align:center">Connexion…</div></div>'; return; }
+  if (mode === "offline") { el.innerHTML = '<div class="login-card">' + img + '<h2>Connexion internet nécessaire</h2><div class="sub2">Le premier lancement doit se faire en ligne pour charger la base de données. Ensuite, l\'application fonctionne aussi hors connexion.</div><button class="btn btn-p" type="button" onclick="location.reload()">Réessayer</button></div>'; return; }
+  el.innerHTML = '<form class="login-card" id="loginForm" novalidate>' + img
+    + '<h2>Espace agence</h2><div class="sub2">Connectez-vous avec le compte créé pour vous.</div>'
+    + '<div><label class="f" for="lg_mail">E-mail</label><input id="lg_mail" type="email" autocomplete="username" required></div>'
+    + '<div><label class="f" for="lg_pw">Mot de passe</label><input id="lg_pw" type="password" autocomplete="current-password" required></div>'
+    + '<div id="loginErr" class="login-err" role="alert"></div><div id="loginOk" class="login-ok" role="status"></div>'
+    + '<button class="btn btn-p" type="submit" id="lg_go">Se connecter</button>'
+    + '<button class="btn btn-q" type="button" id="lg_reset">Mot de passe oublié ?</button></form>';
+  const f = document.getElementById("loginForm");
+  const err = (m) => { document.getElementById("loginErr").textContent = m; document.getElementById("loginOk").textContent = ""; };
+  f.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const mail = document.getElementById("lg_mail").value.trim(), pw = document.getElementById("lg_pw").value;
+    if (!mail || !pw) { err("Indiquez votre e-mail et votre mot de passe."); return; }
+    const b = document.getElementById("lg_go"); b.disabled = true; b.textContent = "Connexion…";
+    firebase.auth().signInWithEmailAndPassword(mail, pw).catch((x) => {
+      b.disabled = false; b.textContent = "Se connecter";
+      const c = (x && x.code) || "";
+      err(/invalid-credential|wrong-password|user-not-found|invalid-login/.test(c) ? "E-mail ou mot de passe incorrect."
+        : /invalid-email/.test(c) ? "Adresse e-mail invalide."
+        : /too-many-requests/.test(c) ? "Trop d'essais. Patientez quelques minutes."
+        : /network-request-failed/.test(c) ? "Pas de connexion internet."
+        : /operation-not-allowed/.test(c) ? "La connexion par e-mail n'est pas activée dans Firebase (Authentication > Sign-in method)."
+        : "Connexion impossible (" + c + ").");
+    });
+  });
+  document.getElementById("lg_reset").addEventListener("click", () => {
+    const mail = document.getElementById("lg_mail").value.trim();
+    if (!mail) { err("Saisissez d'abord votre e-mail, puis cliquez à nouveau."); return; }
+    firebase.auth().sendPasswordResetEmail(mail)
+      .then(() => { document.getElementById("loginErr").textContent = ""; document.getElementById("loginOk").textContent = "Un lien de réinitialisation a été envoyé à " + mail + "."; })
+      .catch(() => err("Envoi impossible. Vérifiez l'adresse."));
+  });
+  setTimeout(() => { const m = document.getElementById("lg_mail"); if (m) m.focus(); }, 30);
+}
+function hideLogin() { const el = document.getElementById("login"); if (el) { el.hidden = true; el.innerHTML = ""; } }
 
 /* ---------- application installable ---------- */
 let INSTALL = null;

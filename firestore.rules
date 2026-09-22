@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Adresses e-mail autorisées à utiliser l'application (en minuscules).
+    // Ajoutez une ligne par agent, séparée par une virgule.
+    function autorise() {
+      return request.auth != null
+        && request.auth.token.email in [
+          "univo2224@gmail.com"
+        ];
+    }
+
+    match /{document=**} {
+      allow read, write: if autorise();
+    }
+  }
+}
