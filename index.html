@@ -342,7 +342,18 @@ const SRV_DEF = [
 const MODES = ["Espèces", "Orange Money", "MTN MoMo", "Virement bancaire", "Chèque", "Carte bancaire"];
 const DEV = { GNF: { d: 0, s: "GNF", u: "franc guinéen", us: "francs guinéens", c: "centime" }, USD: { d: 2, s: "USD", u: "dollar", us: "dollars", c: "cent" }, EUR: { d: 2, s: "EUR", u: "euro", us: "euros", c: "centime" } };
 
-const D = { settings: null, clients: [], services: [], factures: [], recus: [] };
+const D = { settings: null, clients: [], services: [], factures: [], recus: [], utilisateurs: [] };
+const adminRacine = () => String(window.UNIVO_ADMIN || "univo8009@gmail.com").trim().toLowerCase();
+const monMail = () => String((S.user && S.user.email) || "").trim().toLowerCase();
+const estAdmin = () => (!S.fb ? true : S.role === "admin");
+function calcRole() {
+  if (!S.fb) { S.role = "admin"; return; }
+  const m = monMail();
+  if (!m) { S.role = null; return; }
+  if (m === adminRacine()) { S.role = "admin"; return; }
+  const u = D.utilisateurs.find((x) => String(x.email || x.id || "").toLowerCase() === m);
+  S.role = u && u.actif !== false ? (u.role === "admin" ? "admin" : "agent") : null;
+}
 const S = { view: "dash", q: "", sel: null, draft: null, db: null, dl: null, local: false, ro: false, note: "" };
 
 /* ---------- utils ---------- */
@@ -560,6 +571,14 @@ function abonner(db) {
     if (S.fb && !s.exists && !(s.metadata && s.metadata.fromCache)) db.doc("settings/agence").set(Object.assign({}, AG_DEF)).catch(() => {});
     render();
   }, errSnap("réglages")));
+  if (S.fb) {
+    UNSUB.push(db.collection("utilisateurs").onSnapshot((snap) => {
+      D.utilisateurs = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+      calcRole();
+      if (S.user && !S.role) showBloc(); else hideLogin();
+      render();
+    }, () => {}));
+  }
   COLS.forEach((c) => {
     UNSUB.push(db.collection(c).onSnapshot((snap) => {
       D[c] = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
@@ -605,11 +624,13 @@ function fbBoot(cfg) {
   firebase.auth().onAuthStateChanged((u) => {
     if (!u) {
       S.user = null; S.db = null; desabonner();
-      COLS.forEach((c) => { D[c] = []; }); D.settings = null;
+      COLS.forEach((c) => { D[c] = []; }); D.settings = null; D.utilisateurs = []; S.role = null;
       S.view = "dash"; S.draft = null; closeSheet();
       showLogin(); render(true); return;
     }
     S.user = u; S.db = fs; S.ro = false; S.note = "";
+    calcRole();
+    if (S.view === "reglages" && !estAdmin()) S.view = "dash";
     hideLogin(); abonner(fs); render(true);
   });
 }
@@ -630,7 +651,7 @@ const TITRES = {
 function render(force) {
   if (!force && (S.view === "edit" || !document.getElementById("ov").hidden)) return;
   const nav = $("#nav");
-  nav.innerHTML = NAV.map(([k, l, i]) => '<button class="nav-b" data-act="go:' + k + '"' + (S.view === k || (k === "factures" && (S.view === "edit" || S.view === "doc")) ? ' aria-current="page"' : "") + '><span class="ic">' + i + "</span>" + l + "</button>").join("");
+  nav.innerHTML = NAV.filter(([k]) => k !== "reglages" || estAdmin()).map(([k, l, i]) => '<button class="nav-b" data-act="go:' + k + '"' + (S.view === k || (k === "factures" && (S.view === "edit" || S.view === "doc")) ? ' aria-current="page"' : "") + '><span class="ic">' + i + "</span>" + l + "</button>").join("");
   const a = ag();
   $("#railLogo").src = LOGO;
   $("#railFoot").innerHTML = "<strong>" + esc(a.nom) + "</strong>" + esc(a.raison || "") + "<div>" + esc(a.tel || "") + "</div><div>" + esc(a.email || "") + "</div>"
@@ -735,7 +756,7 @@ VIEWS.factures = function () {
   return '<div class="panel"><div class="tw"><table><thead><tr><th>Numéro</th><th>Client</th><th>Dossier</th><th class="num">Total</th><th class="num">Marge</th><th class="num">Payé</th><th>État</th><th></th></tr></thead><tbody>'
     + rows.map((f) => {
       const e = etat(f), v = f.voyage || {};
-      return '<tr><td class="ref" data-act="open-fac:' + f.id + '" style="cursor:pointer">' + esc(f.numero) + '<div class="sub2">' + dfr(f.date) + '</div></td><td>' + esc(cliOf(f).nom || "—") + '<div class="sub2">' + esc(cliOf(f).tel || "") + '</div></td><td>' + esc(trajet(v) || "—") + '<div class="sub2">' + (v.depart ? "départ " + dfr(v.depart) : "") + (v.pnr ? " · " + esc(v.pnr) : "") + '</div></td><td class="num">' + money(totaux(f).total, f.devise) + '</td><td class="num"' + mgCls(totaux(f).marge) + ">" + money(totaux(f).marge, f.devise) + '<div class="sub2">' + pct(totaux(f).taux) + '</div></td><td class="num">' + money(paye(f), f.devise) + (solde(f) > 0.004 && e.k !== "annulee" ? '<div class="sub2">solde ' + money(solde(f), f.devise) + "</div>" : "") + '</td><td><span class="tag ' + e.c + '">' + e.t + '</span></td><td><div class="rowact">' + (S.ro ? "" : (e.k === "payee" || e.k === "annulee" ? "" : '<button class="btn btn-q" data-act="pay:' + f.id + '">Encaisser</button>') + '<button class="btn btn-q" data-act="edit-fac:' + f.id + '">Modifier</button><button class="btn btn-q btn-d" data-act="del-fac:' + f.id + '">Supprimer</button>') + '<button class="btn btn-q" data-act="open-fac:' + f.id + '">Ouvrir</button></div></td></tr>';
+      return '<tr><td class="ref" data-act="open-fac:' + f.id + '" style="cursor:pointer">' + esc(f.numero) + '<div class="sub2">' + dfr(f.date) + '</div></td><td>' + esc(cliOf(f).nom || "—") + '<div class="sub2">' + esc(cliOf(f).tel || "") + '</div></td><td>' + esc(trajet(v) || "—") + '<div class="sub2">' + (v.depart ? "départ " + dfr(v.depart) : "") + (v.pnr ? " · " + esc(v.pnr) : "") + '</div></td><td class="num">' + money(totaux(f).total, f.devise) + '</td><td class="num"' + mgCls(totaux(f).marge) + ">" + money(totaux(f).marge, f.devise) + '<div class="sub2">' + pct(totaux(f).taux) + '</div></td><td class="num">' + money(paye(f), f.devise) + (solde(f) > 0.004 && e.k !== "annulee" ? '<div class="sub2">solde ' + money(solde(f), f.devise) + "</div>" : "") + '</td><td><span class="tag ' + e.c + '">' + e.t + '</span></td><td><div class="rowact">' + (S.ro ? "" : (e.k === "payee" || e.k === "annulee" ? "" : '<button class="btn btn-q" data-act="pay:' + f.id + '">Encaisser</button>') + '<button class="btn btn-q" data-act="edit-fac:' + f.id + '">Modifier</button>' + (estAdmin() ? '<button class="btn btn-q btn-d" data-act="del-fac:' + f.id + '">Supprimer</button>' : "") + '') + '<button class="btn btn-q" data-act="open-fac:' + f.id + '">Ouvrir</button></div></td></tr>';
     }).join("") + "</tbody></table></div></div>";
 };
 VIEWS.recus = function () {
@@ -743,7 +764,7 @@ VIEWS.recus = function () {
     .sort((x, y) => String(y.numero || "").localeCompare(String(x.numero || "")));
   if (!rows.length) return '<div class="panel">' + vide(S.q ? "Aucun reçu ne correspond" : "Aucun reçu enregistré", S.q ? "Essayez un autre numéro ou nom de client." : "Chaque encaissement saisi sur une facture produit un reçu numéroté.", S.ro ? "" : '<button class="btn btn-p" data-act="new-rec">Nouveau reçu</button>') + "</div>";
   return '<div class="panel"><div class="tw"><table><thead><tr><th>Numéro</th><th>Client</th><th>Objet</th><th>Mode</th><th class="num">Montant</th><th></th></tr></thead><tbody>'
-    + rows.map((r) => '<tr><td class="ref" data-act="open-rec:' + r.id + '" style="cursor:pointer">' + esc(r.numero) + '<div class="sub2">' + dfr(r.date) + '</div></td><td>' + esc((r.client || {}).nom || "—") + '<div class="sub2">' + esc((r.client || {}).tel || "") + '</div></td><td>' + esc(r.objet || "—") + (r.factureNumero ? '<div class="sub2">sur ' + esc(r.factureNumero) + "</div>" : "") + '</td><td><span class="tag">' + esc(r.mode || "—") + '</span>' + (r.reference ? '<div class="sub2">' + esc(r.reference) + "</div>" : "") + '</td><td class="num">' + money(r.montant, r.devise) + '</td><td><div class="rowact">' + (S.ro ? "" : '<button class="btn btn-q btn-d" data-act="del-rec:' + r.id + '">Supprimer</button>') + '<button class="btn btn-q" data-act="open-rec:' + r.id + '">Ouvrir</button></div></td></tr>').join("")
+    + rows.map((r) => '<tr><td class="ref" data-act="open-rec:' + r.id + '" style="cursor:pointer">' + esc(r.numero) + '<div class="sub2">' + dfr(r.date) + '</div></td><td>' + esc((r.client || {}).nom || "—") + '<div class="sub2">' + esc((r.client || {}).tel || "") + '</div></td><td>' + esc(r.objet || "—") + (r.factureNumero ? '<div class="sub2">sur ' + esc(r.factureNumero) + "</div>" : "") + '</td><td><span class="tag">' + esc(r.mode || "—") + '</span>' + (r.reference ? '<div class="sub2">' + esc(r.reference) + "</div>" : "") + '</td><td class="num">' + money(r.montant, r.devise) + '</td><td><div class="rowact">' + (S.ro || !estAdmin() ? "" : '<button class="btn btn-q btn-d" data-act="del-rec:' + r.id + '">Supprimer</button>') + '<button class="btn btn-q" data-act="open-rec:' + r.id + '">Ouvrir</button></div></td></tr>').join("")
     + "</tbody></table></div></div>";
 };
 VIEWS.clients = function () {
@@ -753,7 +774,7 @@ VIEWS.clients = function () {
     + rows.map((c) => {
       const fs = D.factures.filter((f) => f.clientId === c.id);
       const sd = fs.filter((f) => etat(f).k !== "annulee").reduce((a, f) => a + solde(f), 0);
-      return "<tr><td><strong>" + esc(c.nom) + "</strong>" + (c.email ? '<div class="sub2">' + esc(c.email) + "</div>" : "") + "</td><td>" + esc(c.tel || "—") + "</td><td>" + esc(c.passeport || "—") + (c.nationalite ? '<div class="sub2">' + esc(c.nationalite) + "</div>" : "") + '</td><td class="num">' + fs.length + '</td><td class="num">' + (sd > 0.004 ? money(sd) : "—") + '</td><td><div class="rowact">' + (S.ro ? "" : '<button class="btn btn-q" data-act="new-fac-cli:' + c.id + '">Facturer</button><button class="btn btn-q" data-act="edit-cli:' + c.id + '">Modifier</button>' + (fs.length ? "" : '<button class="btn btn-q btn-d" data-act="del-cli:' + c.id + '">Supprimer</button>')) + "</div></td></tr>";
+      return "<tr><td><strong>" + esc(c.nom) + "</strong>" + (c.email ? '<div class="sub2">' + esc(c.email) + "</div>" : "") + "</td><td>" + esc(c.tel || "—") + "</td><td>" + esc(c.passeport || "—") + (c.nationalite ? '<div class="sub2">' + esc(c.nationalite) + "</div>" : "") + '</td><td class="num">' + fs.length + '</td><td class="num">' + (sd > 0.004 ? money(sd) : "—") + '</td><td><div class="rowact">' + (S.ro ? "" : '<button class="btn btn-q" data-act="new-fac-cli:' + c.id + '">Facturer</button><button class="btn btn-q" data-act="edit-cli:' + c.id + '">Modifier</button>' + (fs.length || !estAdmin() ? "" : '<button class="btn btn-q btn-d" data-act="del-cli:' + c.id + '">Supprimer</button>')) + "</div></td></tr>";
     }).join("") + "</tbody></table></div></div>";
 };
 VIEWS.departs = function () {
@@ -770,7 +791,7 @@ VIEWS.departs = function () {
 VIEWS.services = function () {
   const rows = srvTri();
   return '<div class="panel">' + (rows.length ? '<div class="tw"><table><thead><tr><th>Prestation</th><th>Détail repris sur la facture</th><th class="num">Prix système</th><th class="num">Prix de vente</th><th class="num">Marge</th><th></th></tr></thead><tbody>'
-    + rows.map((s) => "<tr><td><strong>" + esc(s.libelle) + "</strong>" + (s.actif === false ? ' <span class="tag">retirée</span>' : "") + '</td><td class="sub2">' + esc(s.detail || "—") + '</td><td class="num">' + (num(s.cout) ? money(s.cout) : "—") + '</td><td class="num">' + (num(s.prix) ? money(s.prix) : "—") + '</td><td class="num">' + (num(s.prix) ? money(num(s.prix) - num(s.cout)) : "—") + '</td><td><div class="rowact">' + (S.ro ? "" : '<button class="btn btn-q" data-act="edit-srv:' + s.id + '">Modifier</button><button class="btn btn-q btn-d" data-act="del-srv:' + s.id + '">Supprimer</button>') + "</div></td></tr>").join("") + "</tbody></table></div>"
+    + rows.map((s) => "<tr><td><strong>" + esc(s.libelle) + "</strong>" + (s.actif === false ? ' <span class="tag">retirée</span>' : "") + '</td><td class="sub2">' + esc(s.detail || "—") + '</td><td class="num">' + (num(s.cout) ? money(s.cout) : "—") + '</td><td class="num">' + (num(s.prix) ? money(s.prix) : "—") + '</td><td class="num">' + (num(s.prix) ? money(num(s.prix) - num(s.cout)) : "—") + '</td><td><div class="rowact">' + (S.ro ? "" : '<button class="btn btn-q" data-act="edit-srv:' + s.id + '">Modifier</button>' + (estAdmin() ? '<button class="btn btn-q btn-d" data-act="del-srv:' + s.id + '">Supprimer</button>' : "") + '') + "</div></td></tr>").join("") + "</tbody></table></div>"
     : vide("Catalogue vide", "Ajoutez vos prestations pour les retrouver dans le sélecteur des lignes de facture.", S.ro ? "" : '<button class="btn btn-p" data-act="new-srv">Nouvelle prestation</button>')) + "</div>";
 };
 /* ---------- éditeur de facture ---------- */
@@ -877,8 +898,8 @@ function docActions() {
   let h = '<button class="btn" data-act="back-list">Retour</button>';
   if (f && w && etat(f).k !== "payee" && etat(f).k !== "annulee") h += '<button class="btn btn-o" data-act="pay:' + f.id + '">Encaisser</button>';
   if (f && w) h += '<button class="btn" data-act="edit-fac:' + f.id + '">Modifier</button>';
-  if (w && s.t === "fac" && f) h += '<button class="btn btn-d" data-act="del-fac:' + f.id + '">Supprimer</button>';
-  if (w && s.t === "rec" && D.recus.some((x) => x.id === s.id)) h += '<button class="btn btn-d" data-act="del-rec:' + s.id + '">Supprimer</button>';
+  if (w && estAdmin() && s.t === "fac" && f) h += '<button class="btn btn-d" data-act="del-fac:' + f.id + '">Supprimer</button>';
+  if (w && estAdmin() && s.t === "rec" && D.recus.some((x) => x.id === s.id)) h += '<button class="btn btn-d" data-act="del-rec:' + s.id + '">Supprimer</button>';
   h += '<button class="btn" data-act="wa">Texte WhatsApp</button>';
   if (S.dl) h += '<button class="btn" data-act="dl-doc">Télécharger</button>';
   h += '<button class="btn btn-p" data-act="print">Imprimer</button>';
@@ -931,6 +952,7 @@ function docRecu(r) {
 }
 /* ---------- réglages ---------- */
 VIEWS.reglages = function () {
+  if (!estAdmin()) return '<div class="panel">' + vide("Réservé à la direction", "Les réglages de l'agence et la gestion des comptes sont accessibles au directeur uniquement.", '<button class="btn btn-p" data-act="go:dash">Retour au tableau de bord</button>') + "</div>";
   const a = ag();
   const i = (lab, k, ph, type) => '<div><label class="f" for="s_' + k + '">' + esc(lab) + '</label><input id="s_' + k + '" type="' + (type || "text") + '" data-s="' + k + '" value="' + esc(a[k] == null ? "" : a[k]) + '"' + (ph ? ' placeholder="' + esc(ph) + '"' : "") + "></div>";
   const ta = (lab, k, ph) => '<div><label class="f" for="s_' + k + '">' + esc(lab) + '</label><textarea id="s_' + k + '" data-s="' + k + '" placeholder="' + esc(ph || "") + '">' + esc(a[k] || "") + "</textarea></div>";
@@ -947,9 +969,27 @@ VIEWS.reglages = function () {
     + '<div class="panel"><div class="panel-h"><h3>Données</h3><div class="r sub2">Version 3 · ' + (S.fb ? "Firestore (" + esc((window.UNIVO_FIREBASE || {}).projectId || "") + ")" : S.local ? "données du poste" : "en ligne") + '</div></div><div class="panel-b sub2">' + D.clients.length + " client(s) · " + D.factures.length + " facture(s) · " + D.recus.length + " reçu(s) · " + D.services.length + " prestation(s)."
     + (S.fb ? " Ces données sont enregistrées dans Firestore et partagées entre tous les postes connectés, même hors connexion (synchronisation au retour du réseau)." : S.local ? " Ces données sont conservées dans ce navigateur." : " Ces données sont enregistrées avec l'application et visibles par les personnes qui y ont accès.")
     + '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">' + (S.dl ? '<button class="btn" data-act="export">Exporter en CSV</button><button class="btn" data-act="bk-json">Sauvegarde JSON</button>' : "") + (S.local || S.fb ? '<button class="btn" data-act="restore">' + (S.fb ? "Importer une sauvegarde JSON" : "Restaurer une sauvegarde") + "</button>" : "") + (S.fb && hasLocal() ? '<button class="btn btn-o" data-act="push-local">Envoyer les données de ce poste en ligne</button>' : "") + "</div></div></div>"
-    + (S.fb && S.user ? '<div class="panel"><div class="panel-h"><h3>Compte</h3></div><div class="panel-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span>Connecté : <strong>' + esc(S.user.email || "") + '</strong></span><button class="btn" data-act="logout">Se déconnecter</button></div></div>' : "")
+    + (S.fb && S.user ? panneauComptes() : "")
+    + (S.fb && S.user ? '<div class="panel"><div class="panel-h"><h3>Mon compte</h3></div><div class="panel-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span>Connecté : <strong>' + esc(S.user.email || "") + '</strong>' + (monMail() === adminRacine() ? " · direction" : "") + '</span><button class="btn" data-act="chg-pw">Changer mon mot de passe</button><button class="btn" data-act="logout">Se déconnecter</button></div></div>' : "")
     + "</div>";
 };
+
+function panneauComptes() {
+  const racine = adminRacine();
+  const liste = D.utilisateurs.slice().sort((x, y) => String(x.nom || x.email).localeCompare(String(y.nom || y.email)));
+  const ligne = (u, fixe) => {
+    const mail = String(u.email || u.id || "").toLowerCase(), off = u.actif === false;
+    return "<tr><td><strong>" + esc(u.nom || "—") + "</strong>" + (mail === monMail() ? ' <span class="tag">vous</span>' : "") + '<div class="sub2">' + esc(mail) + "</div></td><td>" + (u.role === "admin" ? '<span class="tag due">Direction</span>' : '<span class="tag">Agent</span>')
+      + '</td><td>' + (off ? '<span class="tag no">Accès retiré</span>' : '<span class="tag ok">Actif</span>') + '</td><td><div class="rowact">'
+      + (fixe ? '<span class="sub2">compte principal</span>' : '<button class="btn btn-q" data-act="pw-reset:' + mail + '">Réinitialiser le mot de passe</button><button class="btn btn-q" data-act="tog-user:' + mail + '">' + (off ? "Réactiver" : "Retirer l\'accès") + "</button>")
+      + "</div></td></tr>";
+  };
+  const moiRacine = { nom: (D.utilisateurs.find((x) => String(x.email || x.id).toLowerCase() === racine) || {}).nom || "Direction", email: racine, role: "admin", actif: true };
+  const rows = ligne(moiRacine, true) + liste.filter((u) => String(u.email || u.id || "").toLowerCase() !== racine).map((u) => ligne(u, false)).join("");
+  return '<div class="panel"><div class="panel-h"><h3>Comptes des employés</h3><div class="r"><button class="btn btn-p" data-act="new-user">Créer un compte</button></div></div>'
+    + '<div class="tw"><table><thead><tr><th>Utilisateur</th><th>Rôle</th><th>Accès</th><th></th></tr></thead><tbody>' + rows + "</tbody></table></div>"
+    + '<div class="panel-b sub2">Un agent voit les factures, les reçus, les clients et les départs. Seule la direction accède aux réglages et aux comptes.</div></div>';
+}
 
 /* ---------- fenêtres ---------- */
 function sheet(titre, corps, pied) {
@@ -1076,6 +1116,7 @@ function paintWork() { $("#work").innerHTML = (S.note ? '<div class="notice nopr
 function go(v) { S.view = v; S.q = ""; S.draft = null; render(true); }
 function openDoc(t, id) { S.sel = { t: t, id: id }; S.view = "doc"; render(true); }
 
+const refusSuppr = () => { if (estAdmin()) return false; toast("La suppression est réservée à la direction."); return true; };
 const ACT = {
   go: (v) => go(v),
   close: () => closeSheet(),
@@ -1145,7 +1186,7 @@ const ACT = {
     else render(true);
     toast("Client enregistré.");
   },
-  "del-cli": (id) => modalConfirm("Supprimer ce client ?", "Ses coordonnées disparaissent de la liste. Les factures déjà émises ne sont pas modifiées.", "do-del-cli:" + id),
+  "del-cli": (id) => { if (refusSuppr()) return; modalConfirm("Supprimer ce client ?", "Ses coordonnées disparaissent de la liste. Les factures déjà émises ne sont pas modifiées.", "do-del-cli:" + id); },
   "do-del-cli": async (id) => { closeSheet(); try { await drop("clients", id); } catch (e) { return; } if (S.db) D.clients = D.clients.filter((x) => x.id !== id); render(true); toast("Client supprimé."); },
 
   "new-srv": () => modalSrv(""),
@@ -1159,7 +1200,7 @@ const ACT = {
     if (S.db) { const i = D.services.findIndex((x) => x.id === sid); const rec = Object.assign({ id: sid }, body); if (i < 0) D.services.push(rec); else D.services[i] = rec; }
     closeSheet(); render(true); toast("Prestation enregistrée.");
   },
-  "del-srv": (id) => modalConfirm("Supprimer cette prestation ?", "Elle quitte le catalogue. Les factures déjà émises conservent leurs lignes.", "do-del-srv:" + id),
+  "del-srv": (id) => { if (refusSuppr()) return; modalConfirm("Supprimer cette prestation ?", "Elle quitte le catalogue. Les factures déjà émises conservent leurs lignes.", "do-del-srv:" + id); },
   "do-del-srv": async (id) => { closeSheet(); try { await drop("services", id); } catch (e) { return; } if (S.db) D.services = D.services.filter((x) => x.id !== id); render(true); toast("Prestation supprimée."); },
 
   pay: (id) => modalPay(id),
@@ -1197,6 +1238,7 @@ const ACT = {
     closeSheet(); openDoc("rec", rid); toast("Reçu " + body.numero + " établi.");
   },
   "del-fac": (id) => {
+    if (refusSuppr()) return;
     const f = D.factures.find((x) => x.id === id); if (!f) return;
     const n = recusDe(id).length;
     modalConfirm("Supprimer la facture " + f.numero + " ?", "Cette suppression est définitive." + (n ? " Les " + n + " reçu(s) liés à cette facture seront aussi supprimés." : ""), "do-del-fac:" + id);
@@ -1208,7 +1250,7 @@ const ACT = {
     if (S.db) { D.recus = D.recus.filter((r) => lies.indexOf(r.id) < 0); D.factures = D.factures.filter((x) => x.id !== id); }
     go("factures"); toast("Facture supprimée.");
   },
-  "del-rec": (id) => modalConfirm("Supprimer ce reçu ?", "Le montant sera retiré du total encaissé de la facture liée.", "do-del-rec:" + id),
+  "del-rec": (id) => { if (refusSuppr()) return; modalConfirm("Supprimer ce reçu ?", "Le montant sera retiré du total encaissé de la facture liée.", "do-del-rec:" + id); },
   "do-del-rec": async (id) => { closeSheet(); try { await drop("recus", id); } catch (e) { return; } if (S.db) D.recus = D.recus.filter((x) => x.id !== id); go("recus"); toast("Reçu supprimé."); },
 
   "save-ag": async () => {
@@ -1304,6 +1346,63 @@ ACT["push-local"] = () => {
 ACT["do-push-local"] = () => { closeSheet(); envoyerTout(lireLocal() || {}); };
 ACT.logout = () => { try { firebase.auth().signOut(); } catch (e) {} };
 
+/* comptes des employés (direction) */
+function appSecondaire() {
+  const cfg = window.UNIVO_FIREBASE;
+  try { return firebase.app("univo-admin"); } catch (e) { return firebase.initializeApp(cfg, "univo-admin"); }
+}
+ACT["new-user"] = () => {
+  sheet("Créer un compte employé",
+    '<div class="grid"><div><label class="f" for="u_nom">Nom de l\'employé</label><input id="u_nom" type="text"></div>'
+    + '<div><label class="f" for="u_mail">Adresse e-mail</label><input id="u_mail" type="email" autocomplete="off"></div>'
+    + '<div><label class="f" for="u_pw">Mot de passe provisoire</label><input id="u_pw" type="text" value="univo' + Math.floor(1000 + Math.random() * 9000) + '"><div class="sub2" style="margin-top:4px">6 caractères minimum. Communiquez-le à l\'employé : il pourra le changer avec « Mot de passe oublié » sur l\'écran de connexion.</div></div>'
+    + '<div><label class="f" for="u_role">Rôle</label><select id="u_role"><option value="agent">Agent — factures, reçus, clients</option><option value="admin">Direction — accès complet</option></select></div></div>',
+    '<button class="btn" data-act="close">Annuler</button><button class="btn btn-p" data-act="ok-user">Créer le compte</button>');
+};
+ACT["ok-user"] = async () => {
+  const nom = val("u_nom"), mail = val("u_mail").toLowerCase(), pw = val("u_pw"), role = val("u_role");
+  if (!nom) { toast("Indiquez le nom."); return; }
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)) { toast("Adresse e-mail invalide."); return; }
+  if (pw.length < 6) { toast("Le mot de passe doit faire 6 caractères au moins."); return; }
+  let etat = "cree";
+  try {
+    const a2 = appSecondaire();
+    await a2.auth().createUserWithEmailAndPassword(mail, pw);
+    try { await a2.auth().signOut(); } catch (e) {}
+  } catch (e) {
+    const c = (e && e.code) || "";
+    if (/email-already-in-use/.test(c)) etat = "existe";
+    else { toast(/weak-password/.test(c) ? "Mot de passe trop simple." : /network/.test(c) ? "Pas de connexion internet." : "Création impossible (" + c + ")."); return; }
+  }
+  try { await put("utilisateurs", mail, { email: mail, nom: nom, role: role, actif: true, cree: new Date().toISOString() }); } catch (e) { return; }
+  closeSheet(); render(true);
+  toast(etat === "existe" ? "Ce compte existait déjà : l'accès lui a été donné." : "Compte créé pour " + nom + ".");
+};
+ACT["tog-user"] = async (mail) => {
+  const u = D.utilisateurs.find((x) => String(x.email || x.id || "").toLowerCase() === mail); if (!u) return;
+  const off = u.actif === false;
+  try { await put("utilisateurs", u.id || mail, Object.assign({}, u, { actif: off })); } catch (e) { return; }
+  render(true); toast(off ? "Accès rétabli." : "Accès retiré. L'employé ne peut plus ouvrir les données.");
+};
+ACT["pw-reset"] = (mail) => {
+  firebase.auth().sendPasswordResetEmail(mail)
+    .then(() => toast("Lien de réinitialisation envoyé à " + mail + "."))
+    .catch(() => toast("Envoi impossible. Vérifiez l'adresse."));
+};
+ACT["chg-pw"] = () => {
+  sheet("Changer mon mot de passe",
+    '<div class="grid"><div><label class="f" for="mp_1">Nouveau mot de passe</label><input id="mp_1" type="password" autocomplete="new-password"></div>'
+    + '<div><label class="f" for="mp_2">Confirmer</label><input id="mp_2" type="password" autocomplete="new-password"></div></div>',
+    '<button class="btn" data-act="close">Annuler</button><button class="btn btn-p" data-act="ok-pw">Enregistrer</button>');
+};
+ACT["ok-pw"] = async () => {
+  const a = val("mp_1"), b = val("mp_2");
+  if (a.length < 6) { toast("6 caractères minimum."); return; }
+  if (a !== b) { toast("Les deux mots de passe sont différents."); return; }
+  try { await firebase.auth().currentUser.updatePassword(a); closeSheet(); toast("Mot de passe modifié."); }
+  catch (e) { toast(/requires-recent-login/.test((e && e.code) || "") ? "Déconnectez-vous puis reconnectez-vous avant de le changer." : "Modification impossible."); }
+};
+
 function showLogin(mode) {
   let el = document.getElementById("login");
   if (!el) { el = document.createElement("div"); el.id = "login"; el.className = "login"; document.body.appendChild(el); }
@@ -1344,6 +1443,12 @@ function showLogin(mode) {
       .catch(() => err("Envoi impossible. Vérifiez l'adresse."));
   });
   setTimeout(() => { const m = document.getElementById("lg_mail"); if (m) m.focus(); }, 30);
+}
+function showBloc() {
+  let el = document.getElementById("login");
+  if (!el) { el = document.createElement("div"); el.id = "login"; el.className = "login"; document.body.appendChild(el); }
+  el.hidden = false;
+  el.innerHTML = '<div class="login-card"><img src="' + LOGO + '" alt="UNIVO"><h2>Accès non autorisé</h2><div class="sub2">Ce compte n\'a pas accès aux données de l\'agence. Demandez à la direction de vous créer un accès dans Réglages &gt; Comptes des employés.</div><div class="sub2">' + esc(monMail()) + '</div><button class="btn btn-p" type="button" data-act="logout">Se déconnecter</button></div>';
 }
 function hideLogin() { const el = document.getElementById("login"); if (el) { el.hidden = true; el.innerHTML = ""; } }
 
