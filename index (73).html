@@ -3,6 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#062A49">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/favicon-64.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="UNIVO">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>UNIVO — Gestion, factures et reçus</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -484,7 +492,7 @@ function erreur(e) {
 const COLS = ["clients", "services", "factures", "recus"];
 async function boot() {
   render();
-  if (!CL) { S.local = true; lload(); S.dl = { save: blobSave }; S.note = "Données enregistrées sur ce poste, dans ce navigateur. Faites une sauvegarde JSON de temps en temps depuis Réglages."; render(); return; }
+  if (!CL) { S.local = true; lload(); S.dl = { save: blobSave }; pwaInit(); S.note = "Données enregistrées sur ce poste, dans ce navigateur. Faites une sauvegarde JSON de temps en temps depuis Réglages."; render(); return; }
   const db = await CL.use("db");
   if (!db) { S.local = true; lload(); S.note = "Enregistrement partagé indisponible : les données restent dans ce navigateur uniquement."; render(); return; }
   S.db = db;
@@ -535,7 +543,7 @@ function topActions() {
   if (S.view === "recus") return search() + (w ? '<button class="btn btn-p" data-act="new-rec">Nouveau reçu</button>' : "");
   if (S.view === "clients") return search() + (w ? '<button class="btn btn-p" data-act="new-cli">Nouveau client</button>' : "");
   if (S.view === "services" && w) return '<button class="btn btn-p" data-act="new-srv">Nouvelle prestation</button>';
-  if (S.view === "dash") return (S.dl ? '<button class="btn" data-act="export">Exporter la comptabilité</button>' : "") + (w ? '<button class="btn btn-p" data-act="new-fac">Nouvelle facture</button>' : "");
+  if (S.view === "dash") return (S.canInstall && !S.standalone ? '<button class="btn btn-o" data-act="install">Installer l\'application</button>' : "") + (S.dl ? '<button class="btn" data-act="export">Exporter la comptabilité</button>' : "") + (w ? '<button class="btn btn-p" data-act="new-fac">Nouvelle facture</button>' : "");
   if (S.view === "edit") return '<button class="btn" data-act="go:factures">Abandonner</button><button class="btn btn-p" data-act="save-fac">Enregistrer la facture</button>';
   if (S.view === "doc") return docActions();
   return "";
@@ -1166,6 +1174,31 @@ function loadBackup(o) {
   lsave(); render(true);
   toast("Sauvegarde restaurée : " + D.factures.length + " facture(s), " + D.recus.length + " reçu(s).");
 }
+
+/* ---------- application installable ---------- */
+let INSTALL = null;
+function pwaInit() {
+  S.standalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true;
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if (ios && !S.standalone) { S.ios = true; S.canInstall = true; }
+  if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  }
+  window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); INSTALL = e; S.canInstall = true; render(); });
+  window.addEventListener("appinstalled", () => { INSTALL = null; S.canInstall = false; render(); toast("UNIVO est installée sur cet appareil."); });
+}
+ACT.install = async () => {
+  if (INSTALL) {
+    INSTALL.prompt();
+    try { const r = await INSTALL.userChoice; if (r && r.outcome === "accepted") { S.canInstall = false; INSTALL = null; render(true); } } catch (e) {}
+    return;
+  }
+  if (S.ios) {
+    sheet("Installer sur iPhone ou iPad", '<ol style="margin:0;padding-left:20px;line-height:1.9"><li>Ouvrez cette page dans <strong>Safari</strong>.</li><li>Touchez le bouton <strong>Partager</strong> (carré avec une flèche).</li><li>Choisissez <strong>Sur l\'écran d\'accueil</strong>, puis <strong>Ajouter</strong>.</li></ol>', '<button class="btn btn-p" data-act="close">Compris</button>');
+    return;
+  }
+  sheet("Installer l'application", '<div>Dans le menu du navigateur (⋮), choisissez <strong>Installer l\'application</strong> ou <strong>Ajouter à l\'écran d\'accueil</strong>.</div>', '<button class="btn btn-p" data-act="close">Compris</button>');
+};
 
 boot();
 
