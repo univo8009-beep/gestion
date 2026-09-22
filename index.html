@@ -15,7 +15,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="firebase-config.js"></script>
+<script src="firebase-config.js?v=3"></script>
 <title>UNIVO — Gestion, factures et reçus</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -634,6 +634,7 @@ function render(force) {
   const a = ag();
   $("#railLogo").src = LOGO;
   $("#railFoot").innerHTML = "<strong>" + esc(a.nom) + "</strong>" + esc(a.raison || "") + "<div>" + esc(a.tel || "") + "</div><div>" + esc(a.email || "") + "</div>"
+    + '<div style="margin-top:8px;opacity:.6">Version 3 · ' + (S.fb ? "Firestore" : S.local ? "données du poste" : "en ligne") + "</div>"
     + (S.fb && S.user ? '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--rail-line)">' + esc(S.user.email || "") + '<br><button class="btn btn-q" data-act="logout" style="color:#fff;padding:4px 0">Se déconnecter</button></div>' : "");
   const [t, sub] = TITRES[S.view] || TITRES.dash;
   $("#top").innerHTML = '<div><h1>' + esc(t) + '</h1><div class="sub">' + esc(sub) + "</div></div>" + '<div class="top-act">' + topActions() + "</div>";
@@ -943,7 +944,7 @@ VIEWS.reglages = function () {
     + '<div class="panel"><div class="panel-h"><h3>Mentions imprimées</h3></div><div class="panel-b"><div class="grid">'
     + ta("Conditions", "conditions") + ta("Moyens de paiement acceptés", "paiement") + "</div></div></div>"
     + (S.ro ? "" : '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-p" data-act="save-ag">Enregistrer les réglages</button></div>')
-    + '<div class="panel"><div class="panel-h"><h3>Données</h3></div><div class="panel-b sub2">' + D.clients.length + " client(s) · " + D.factures.length + " facture(s) · " + D.recus.length + " reçu(s) · " + D.services.length + " prestation(s)."
+    + '<div class="panel"><div class="panel-h"><h3>Données</h3><div class="r sub2">Version 3 · ' + (S.fb ? "Firestore (" + esc((window.UNIVO_FIREBASE || {}).projectId || "") + ")" : S.local ? "données du poste" : "en ligne") + '</div></div><div class="panel-b sub2">' + D.clients.length + " client(s) · " + D.factures.length + " facture(s) · " + D.recus.length + " reçu(s) · " + D.services.length + " prestation(s)."
     + (S.fb ? " Ces données sont enregistrées dans Firestore et partagées entre tous les postes connectés, même hors connexion (synchronisation au retour du réseau)." : S.local ? " Ces données sont conservées dans ce navigateur." : " Ces données sont enregistrées avec l'application et visibles par les personnes qui y ont accès.")
     + '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">' + (S.dl ? '<button class="btn" data-act="export">Exporter en CSV</button><button class="btn" data-act="bk-json">Sauvegarde JSON</button>' : "") + (S.local || S.fb ? '<button class="btn" data-act="restore">' + (S.fb ? "Importer une sauvegarde JSON" : "Restaurer une sauvegarde") + "</button>" : "") + (S.fb && hasLocal() ? '<button class="btn btn-o" data-act="push-local">Envoyer les données de ce poste en ligne</button>' : "") + "</div></div></div>"
     + (S.fb && S.user ? '<div class="panel"><div class="panel-h"><h3>Compte</h3></div><div class="panel-b" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span>Connecté : <strong>' + esc(S.user.email || "") + '</strong></span><button class="btn" data-act="logout">Se déconnecter</button></div></div>' : "")
