@@ -5,9 +5,9 @@
    Remplacez seulement ce qui est entre guillemets.
    ===================================================================== */
 window.UNIVO_FIREBASE = {
-  apiKey: "COLLEZ_ICI_VOTRE_API_KEY",
+  apiKey: "AIzaSyAFwFAMJ1baJgEN1QWuU81S18MyJuzMt90",
   authDomain: "votre-projet.firebaseapp.com",
-  projectId: "votre-projet",
+  projectId: "univo8009gestion",
   storageBucket: "votre-projet.appspot.com",
   messagingSenderId: "000000000000",
   appId: "1:000000000000:web:0000000000000000"
