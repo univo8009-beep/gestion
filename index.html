@@ -142,6 +142,9 @@ textarea{min-height:64px; resize:vertical}
 .kpi .v small{font-size:13px; font-weight:500; color:var(--muted); margin-left:3px}
 .kpi .n{font-size:11.5px; color:var(--muted); margin-top:4px}
 .kpi.acc{box-shadow:inset 3px 0 0 var(--orange)}
+.kpis.k5{grid-template-columns:repeat(5,minmax(0,1fr))}
+@media (max-width:1240px){.kpis.k5{grid-template-columns:repeat(3,minmax(0,1fr))}.kpis.k5 .kpi:nth-child(4){border-left:0}.kpis.k5 .kpi:nth-child(n+4){border-top:1px solid var(--line-soft)}}
+@media (max-width:980px){.kpis.k5{grid-template-columns:repeat(2,minmax(0,1fr))}.kpis.k5 .kpi:nth-child(odd){border-left:0}.kpis.k5 .kpi:nth-child(n+3){border-top:1px solid var(--line-soft)}}
 
 /* ---------- tables ---------- */
 table{width:100%; border-collapse:collapse}
@@ -739,10 +742,11 @@ VIEWS.dash = function () {
     + (autres ? '<div class="panel-b sub2" style="border-top:1px solid var(--line-soft)">Les factures en devise étrangère sont comptées à part : ouvrez-les pour voir leur marge.</div>' : "")
     + "</div>";
 
-  const kpis = '<div class="kpis">'
+  const kpis = '<div class="kpis' + (estAdmin() ? " k5" : "") + '">'
     + kpi("Encaissé en " + new Date(mois + "-02").toLocaleDateString("fr-FR", { month: "long" }), enc.big, enc.unit, recM.length + " reçu" + (recM.length > 1 ? "s" : "") + (enc.extra ? " · " + enc.extra : ""), 1)
     + kpi("Reste à recouvrer", due.big, due.unit, duesArr.length + " facture" + (duesArr.length > 1 ? "s" : "") + (due.extra ? " · " + due.extra : ""))
     + kpi("Marge brute du mois", plain(aM.m, main), (DEV[main] || DEV.GNF).s, "taux " + tx(aM) + " · " + facM.length + " facture" + (facM.length > 1 ? "s" : "") + " ce mois")
+    + (estAdmin() ? kpi("Dépenses du mois", plain(aM.d, main), (DEV[main] || DEV.GNF).s, "résultat net " + money(aM.m - aM.d)) : "")
     + kpi("Départs sous 30 jours", String(dep.length), "", dep.length ? "prochain le " + dfr(dep.slice().sort((x, y) => x.voyage.depart < y.voyage.depart ? -1 : 1)[0].voyage.depart) : "aucun dossier daté")
     + "</div>";
   const derniers = D.factures.map((f) => ({ t: "fac", d: f.date, o: f })).concat(D.recus.map((r) => ({ t: "rec", d: r.date, o: r })))
@@ -758,7 +762,12 @@ VIEWS.dash = function () {
     return '<tr data-act="open-fac:' + f.id + '" style="cursor:pointer"><td>' + esc(cliOf(f).nom || "—") + '<div class="sub2">' + esc(f.numero) + (f.echeance ? " · échéance " + dfr(f.echeance) : "") + '</div></td><td class="num">' + money(solde(f), f.devise) + (ret !== null && ret < 0 ? '<div class="sub2" style="color:var(--orange)">' + Math.abs(ret) + " j de retard</div>" : "") + "</td></tr>";
   }).join("") + "</tbody></table></div>" : vide("Rien à recouvrer", "Toutes les factures émises sont soldées.", "");
 
-  return kpis + marges + '<div class="grid g2" style="margin-top:18px"><div class="panel"><div class="panel-h"><h3>Derniers documents</h3><div class="r"><button class="btn btn-q" data-act="go:factures">Tout voir</button></div></div>' + listeDer + '</div><div class="panel"><div class="panel-h"><h3>À recouvrer</h3></div>' + listeRel + "</div></div>";
+  const derDep = D.depenses.slice().sort((x, y) => String(y.date || "").localeCompare(String(x.date || ""))).slice(0, 6);
+  const panDep = !estAdmin() ? "" : '<div class="panel"><div class="panel-h"><h3>Dernières dépenses</h3><div class="r"><button class="btn btn-q" data-act="go:depenses">Tout voir</button></div></div>'
+    + (derDep.length ? '<div class="tw"><table><tbody>' + derDep.map((x) => '<tr data-act="go:depenses" style="cursor:pointer"><td>' + esc(x.libelle || "—") + '<div class="sub2">' + dfr(x.date) + " · " + esc(x.categorie || "") + '</div></td><td class="num">' + money(x.montant, x.devise) + "</td></tr>").join("")
+      + '</tbody></table></div><div class="panel-b sub2" style="border-top:1px solid var(--line-soft);display:flex;justify-content:space-between"><span>Total du mois</span><strong>' + money(aM.d) + "</strong></div>"
+      : vide("Aucune dépense enregistrée", "Le loyer, les salaires ou le carburant apparaîtront ici et seront déduits du résultat.", '<button class="btn btn-p" data-act="new-dep">Nouvelle dépense</button>')) + "</div>";
+  return kpis + marges + '<div class="grid g2" style="margin-top:18px"><div class="panel"><div class="panel-h"><h3>Derniers documents</h3><div class="r"><button class="btn btn-q" data-act="go:factures">Tout voir</button></div></div>' + listeDer + '</div><div class="stack"><div class="panel"><div class="panel-h"><h3>À recouvrer</h3></div>' + listeRel + "</div>" + panDep + "</div></div>";
 };
 function kpi(k, v, u, n, acc) {
   return '<div class="kpi' + (acc ? " acc" : "") + '"><div class="k">' + esc(k) + '</div><div class="v">' + esc(v) + (u ? "<small>" + esc(u) + "</small>" : "") + '</div><div class="n">' + esc(n) + "</div></div>";
