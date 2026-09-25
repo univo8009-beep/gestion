@@ -27,6 +27,7 @@
   --paper:#FFFFFF; --wash:#F2F6FA; --line:#CFE0EC; --line-soft:#E3EDF4;
   --good:#0E7A5F; --good-bg:#E2F1EC; --warn-bg:#FDEADF; --grey-bg:#EDF1F4;
   --rail:#062A49; --rail-ink:#BDD7E8; --rail-line:#123F62;
+  --hd-blue:#075A8D; --hd-orange:#B4530B; --hd-ink:#062A49; --hd-good:#0E7A5F;
   --r:4px; --mono:"Archivo",system-ui,sans-serif;
   color-scheme:light;
 }
@@ -36,6 +37,7 @@
     --paper:#0F2130; --wash:#091622; --line:#1F3C52; --line-soft:#17303F;
     --sky:#12324A; --good-bg:#10332B; --warn-bg:#3A2412; --grey-bg:#152936;
     --rail:#050F18; --rail-line:#14374F;
+    --hd-blue:#8FCDF2; --hd-orange:#F0955A; --hd-ink:#E9F2F8; --hd-good:#63C6A8;
     color-scheme:dark;
   }
 }
@@ -44,6 +46,7 @@
   --paper:#0F2130; --wash:#091622; --line:#1F3C52; --line-soft:#17303F;
   --sky:#12324A; --good-bg:#10332B; --warn-bg:#3A2412; --grey-bg:#152936;
   --rail:#050F18; --rail-line:#14374F;
+  --hd-blue:#8FCDF2; --hd-orange:#F0955A; --hd-ink:#E9F2F8; --hd-good:#63C6A8;
   color-scheme:dark;
 }
 *{box-sizing:border-box}
@@ -142,6 +145,19 @@ textarea{min-height:64px; resize:vertical}
 .kpi .v small{font-size:13px; font-weight:500; color:var(--muted); margin-left:3px}
 .kpi .n{font-size:11.5px; color:var(--muted); margin-top:4px}
 .kpi.acc{box-shadow:inset 3px 0 0 var(--orange)}
+.kpi.c-ok{box-shadow:inset 3px 0 0 var(--good)}
+.kpi.c-orange{box-shadow:inset 3px 0 0 var(--orange)}
+.kpi.c-blue{box-shadow:inset 3px 0 0 var(--blue)}
+.kpi.c-ink{box-shadow:inset 3px 0 0 var(--ink-soft)}
+.kpi.c-ok .k{color:var(--hd-good)}
+.kpi.c-orange .k{color:var(--hd-orange)}
+.kpi.c-blue .k{color:var(--hd-blue)}
+.dash .panel > .panel-h{background:var(--sky); border-bottom-color:var(--line)}
+.dash .panel > .panel-h h3{color:var(--hd-blue)}
+.dash .panel.t-orange > .panel-h{background:var(--warn-bg)}
+.dash .panel.t-orange > .panel-h h3{color:var(--hd-orange)}
+.dash .panel.t-ink > .panel-h{background:var(--grey-bg)}
+.dash .panel.t-ink > .panel-h h3{color:var(--hd-ink)}
 .kpis.k5{grid-template-columns:repeat(5,minmax(0,1fr))}
 @media (max-width:1240px){.kpis.k5{grid-template-columns:repeat(3,minmax(0,1fr))}.kpis.k5 .kpi:nth-child(4){border-left:0}.kpis.k5 .kpi:nth-child(n+4){border-top:1px solid var(--line-soft)}}
 @media (max-width:980px){.kpis.k5{grid-template-columns:repeat(2,minmax(0,1fr))}.kpis.k5 .kpi:nth-child(odd){border-left:0}.kpis.k5 .kpi:nth-child(n+3){border-top:1px solid var(--line-soft)}}
@@ -735,7 +751,7 @@ VIEWS.dash = function () {
   const autres = D.factures.some((f) => etat(f).k !== "annulee" && (f.devise || main) !== main);
   const ligneMg = (lab, o, strong) => "<tr><td>" + (strong ? "<strong>" + esc(lab) + "</strong>" : esc(lab)) + '</td><td class="num">' + money(o.v) + '</td><td class="num">' + money(o.c) + '</td><td class="num"' + mgCls(o.m) + "><strong>" + money(o.m) + '</strong></td><td class="num">' + (o.v > 0 ? pct(o.m / o.v * 100) : "—") + "</td>"
     + (o.d === undefined ? "<td></td><td></td>" : '<td class="num">' + money(o.d) + '</td><td class="num"' + mgCls(o.m - o.d) + "><strong>" + money(o.m - o.d) + "</strong></td>") + "</tr>";
-  const marges = '<div class="panel" style="margin-top:18px"><div class="panel-h"><h3>Marges et résultat</h3><div class="r sub2">marge brute des factures, moins les dépenses de l\'agence</div></div>'
+  const marges = '<div class="panel t-blue" style="margin-top:18px"><div class="panel-h"><h3>Marges et résultat</h3><div class="r sub2">marge brute des factures, moins les dépenses de l\'agence</div></div>'
     + '<div class="tw"><table><thead><tr><th>Période</th><th class="num">Ventes HT</th><th class="num">Prix système</th><th class="num">Marge brute</th><th class="num">Taux</th><th class="num">Dépenses</th><th class="num">Résultat net</th></tr></thead><tbody>'
     + ligneMg("Ce mois (" + aM.n + " facture" + (aM.n > 1 ? "s" : "") + ")", aM, true) + ligneMg("Année " + an + " (" + aA.n + " facture" + (aA.n > 1 ? "s" : "") + ")", aA, true) + "</tbody></table></div>"
     + (pk.length ? '<div class="tw" style="border-top:1px solid var(--line)"><table><thead><tr><th>Par prestation, ' + an + '</th><th class="num">Ventes HT</th><th class="num">Prix système</th><th class="num">Marge brute</th><th class="num">Taux</th></tr></thead><tbody>' + pk.map((k) => ligneMg(k, parts[k])).join("") + "</tbody></table></div>" : "")
@@ -743,11 +759,11 @@ VIEWS.dash = function () {
     + "</div>";
 
   const kpis = '<div class="kpis' + (estAdmin() ? " k5" : "") + '">'
-    + kpi("Encaissé en " + new Date(mois + "-02").toLocaleDateString("fr-FR", { month: "long" }), enc.big, enc.unit, recM.length + " reçu" + (recM.length > 1 ? "s" : "") + (enc.extra ? " · " + enc.extra : ""), 1)
-    + kpi("Reste à recouvrer", due.big, due.unit, duesArr.length + " facture" + (duesArr.length > 1 ? "s" : "") + (due.extra ? " · " + due.extra : ""))
-    + kpi("Marge brute du mois", plain(aM.m, main), (DEV[main] || DEV.GNF).s, "taux " + tx(aM) + " · " + facM.length + " facture" + (facM.length > 1 ? "s" : "") + " ce mois")
-    + (estAdmin() ? kpi("Dépenses du mois", plain(aM.d, main), (DEV[main] || DEV.GNF).s, "résultat net " + money(aM.m - aM.d)) : "")
-    + kpi("Départs sous 30 jours", String(dep.length), "", dep.length ? "prochain le " + dfr(dep.slice().sort((x, y) => x.voyage.depart < y.voyage.depart ? -1 : 1)[0].voyage.depart) : "aucun dossier daté")
+    + kpi("Encaissé en " + new Date(mois + "-02").toLocaleDateString("fr-FR", { month: "long" }), enc.big, enc.unit, recM.length + " reçu" + (recM.length > 1 ? "s" : "") + (enc.extra ? " · " + enc.extra : ""), "ok")
+    + kpi("Reste à recouvrer", due.big, due.unit, duesArr.length + " facture" + (duesArr.length > 1 ? "s" : "") + (due.extra ? " · " + due.extra : ""), "orange")
+    + kpi("Marge brute du mois", plain(aM.m, main), (DEV[main] || DEV.GNF).s, "taux " + tx(aM) + " · " + facM.length + " facture" + (facM.length > 1 ? "s" : "") + " ce mois", "blue")
+    + (estAdmin() ? kpi("Dépenses du mois", plain(aM.d, main), (DEV[main] || DEV.GNF).s, "résultat net " + money(aM.m - aM.d), "orange") : "")
+    + kpi("Départs sous 30 jours", String(dep.length), "", dep.length ? "prochain le " + dfr(dep.slice().sort((x, y) => x.voyage.depart < y.voyage.depart ? -1 : 1)[0].voyage.depart) : "aucun dossier daté", "ink")
     + "</div>";
   const derniers = D.factures.map((f) => ({ t: "fac", d: f.date, o: f })).concat(D.recus.map((r) => ({ t: "rec", d: r.date, o: r })))
     .sort((x, y) => String(y.d || "").localeCompare(String(x.d || ""))).slice(0, 7);
@@ -763,14 +779,14 @@ VIEWS.dash = function () {
   }).join("") + "</tbody></table></div>" : vide("Rien à recouvrer", "Toutes les factures émises sont soldées.", "");
 
   const derDep = D.depenses.slice().sort((x, y) => String(y.date || "").localeCompare(String(x.date || ""))).slice(0, 6);
-  const panDep = !estAdmin() ? "" : '<div class="panel"><div class="panel-h"><h3>Dernières dépenses</h3><div class="r"><button class="btn btn-q" data-act="go:depenses">Tout voir</button></div></div>'
+  const panDep = !estAdmin() ? "" : '<div class="panel t-orange"><div class="panel-h"><h3>Dernières dépenses</h3><div class="r"><button class="btn btn-q" data-act="go:depenses">Tout voir</button></div></div>'
     + (derDep.length ? '<div class="tw"><table><tbody>' + derDep.map((x) => '<tr data-act="go:depenses" style="cursor:pointer"><td>' + esc(x.libelle || "—") + '<div class="sub2">' + dfr(x.date) + " · " + esc(x.categorie || "") + '</div></td><td class="num">' + money(x.montant, x.devise) + "</td></tr>").join("")
       + '</tbody></table></div><div class="panel-b sub2" style="border-top:1px solid var(--line-soft);display:flex;justify-content:space-between"><span>Total du mois</span><strong>' + money(aM.d) + "</strong></div>"
       : vide("Aucune dépense enregistrée", "Le loyer, les salaires ou le carburant apparaîtront ici et seront déduits du résultat.", '<button class="btn btn-p" data-act="new-dep">Nouvelle dépense</button>')) + "</div>";
-  return kpis + marges + '<div class="grid g2" style="margin-top:18px"><div class="panel"><div class="panel-h"><h3>Derniers documents</h3><div class="r"><button class="btn btn-q" data-act="go:factures">Tout voir</button></div></div>' + listeDer + '</div><div class="stack"><div class="panel"><div class="panel-h"><h3>À recouvrer</h3></div>' + listeRel + "</div>" + panDep + "</div></div>";
+  return '<div class="dash">' + kpis + marges + '<div class="grid g2" style="margin-top:18px"><div class="panel"><div class="panel-h"><h3>Derniers documents</h3><div class="r"><button class="btn btn-q" data-act="go:factures">Tout voir</button></div></div>' + listeDer + '</div><div class="stack"><div class="panel t-orange"><div class="panel-h"><h3>À recouvrer</h3></div>' + listeRel + "</div>" + panDep + "</div></div></div>";
 };
 function kpi(k, v, u, n, acc) {
-  return '<div class="kpi' + (acc ? " acc" : "") + '"><div class="k">' + esc(k) + '</div><div class="v">' + esc(v) + (u ? "<small>" + esc(u) + "</small>" : "") + '</div><div class="n">' + esc(n) + "</div></div>";
+  return '<div class="kpi' + (acc ? " c-" + acc : "") + '"><div class="k">' + esc(k) + '</div><div class="v">' + esc(v) + (u ? "<small>" + esc(u) + "</small>" : "") + '</div><div class="n">' + esc(n) + "</div></div>";
 }
 const vide = (t, p, btn) => '<div class="empty"><h4>' + esc(t) + "</h4><div>" + esc(p) + "</div>" + (btn || "") + "</div>";
 
@@ -829,7 +845,7 @@ VIEWS.depenses = function () {
   });
   const ck = Object.keys(parCat).filter((k) => parCat[k] > 0).sort((a, b) => parCat[b] - parCat[a]);
   const entete = '<div class="kpis" style="margin-bottom:18px">'
-    + kpi("Dépenses de " + new Date(mois + "-02").toLocaleDateString("fr-FR", { month: "long" }), plain(tMois, main), (DEV[main] || DEV.GNF).s, tous.filter((x) => String(x.date || "").slice(0, 7) === mois).length + " écriture(s)", 1)
+    + kpi("Dépenses de " + new Date(mois + "-02").toLocaleDateString("fr-FR", { month: "long" }), plain(tMois, main), (DEV[main] || DEV.GNF).s, tous.filter((x) => String(x.date || "").slice(0, 7) === mois).length + " écriture(s)", "orange")
     + kpi("Dépenses " + an, plain(tAn, main), (DEV[main] || DEV.GNF).s, tous.filter((x) => String(x.date || "").slice(0, 4) === an).length + " écriture(s)")
     + kpi("Catégorie la plus lourde", ck.length ? ck[0] : "—", "", ck.length ? money(parCat[ck[0]]) : "aucune dépense saisie")
     + kpi("Moyenne par mois", plain(tAn / Math.max(1, parseInt(today().slice(5, 7), 10)), main), (DEV[main] || DEV.GNF).s, "sur " + an)
