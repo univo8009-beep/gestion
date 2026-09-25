@@ -342,7 +342,8 @@ const SRV_DEF = [
 const MODES = ["Espèces", "Orange Money", "MTN MoMo", "Virement bancaire", "Chèque", "Carte bancaire"];
 const DEV = { GNF: { d: 0, s: "GNF", u: "franc guinéen", us: "francs guinéens", c: "centime" }, USD: { d: 2, s: "USD", u: "dollar", us: "dollars", c: "cent" }, EUR: { d: 2, s: "EUR", u: "euro", us: "euros", c: "centime" } };
 
-const D = { settings: null, clients: [], services: [], factures: [], recus: [], utilisateurs: [] };
+const D = { settings: null, clients: [], services: [], factures: [], recus: [], depenses: [], utilisateurs: [] };
+const CATS = ["Loyer", "Salaires et primes", "Transport et carburant", "Communication et internet", "Fournitures de bureau", "Impôts et taxes", "Commissions", "Frais bancaires", "Publicité", "Entretien et réparations", "Électricité et eau", "Autre dépense"];
 const adminRacine = () => String(window.UNIVO_ADMIN || "univo8009@gmail.com").trim().toLowerCase();
 const monMail = () => String((S.user && S.user.email) || "").trim().toLowerCase();
 const estAdmin = () => (!S.fb ? true : S.role === "admin");
@@ -470,12 +471,12 @@ function numero(kind) {
 const LKEY = "univo.gestion.v1";
 function lsave() {
   if (!S.local) return;
-  try { localStorage.setItem(LKEY, JSON.stringify({ settings: D.settings, clients: D.clients, services: D.services, factures: D.factures, recus: D.recus })); } catch (e) {}
+  try { localStorage.setItem(LKEY, JSON.stringify({ settings: D.settings, clients: D.clients, services: D.services, factures: D.factures, recus: D.recus, depenses: D.depenses })); } catch (e) {}
 }
 function lload() {
   let o = null;
   try { o = JSON.parse(localStorage.getItem(LKEY) || "null"); } catch (e) {}
-  if (o) { D.settings = o.settings || null; ["clients", "services", "factures", "recus"].forEach((c) => { D[c] = Array.isArray(o[c]) ? o[c] : []; }); }
+  if (o) { D.settings = o.settings || null; ["clients", "services", "factures", "recus", "depenses"].forEach((c) => { D[c] = Array.isArray(o[c]) ? o[c] : []; }); }
   if (!D.settings) D.settings = Object.assign({}, AG_DEF);
   if (!D.services.length) D.services = SRV_DEF.map((s) => Object.assign({}, s));
 }
@@ -556,7 +557,15 @@ function erreur(e) {
 /* ---------- amorçage ---------- */
 const COLS = ["clients", "services", "factures", "recus"];
 const UNSUB = [];
-function desabonner() { UNSUB.splice(0).forEach((u) => { try { if (typeof u === "function") u(); } catch (e) {} }); }
+function abonnerDepenses(db) {
+  if (S.subDep) return;
+  S.subDep = true;
+  UNSUB.push(db.collection("depenses").onSnapshot((snap) => {
+    D.depenses = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+    render();
+  }, () => {}));
+}
+function desabonner() { S.subDep = false; UNSUB.splice(0).forEach((u) => { try { if (typeof u === "function") u(); } catch (e) {} }); }
 function abonner(db) {
   desabonner();
   let seeded = false;
@@ -571,10 +580,13 @@ function abonner(db) {
     if (S.fb && !s.exists && !(s.metadata && s.metadata.fromCache)) db.doc("settings/agence").set(Object.assign({}, AG_DEF)).catch(() => {});
     render();
   }, errSnap("réglages")));
+  S.subDep = false;
+  if (!S.fb) abonnerDepenses(db);
   if (S.fb) {
     UNSUB.push(db.collection("utilisateurs").onSnapshot((snap) => {
       D.utilisateurs = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
       calcRole();
+      if (estAdmin()) abonnerDepenses(db); else D.depenses = [];
       if (S.user && !S.role) showBloc(); else hideLogin();
       render();
     }, () => {}));
@@ -636,11 +648,12 @@ function fbBoot(cfg) {
 }
 
 /* ---------- châssis ---------- */
-const NAV = [["dash", "Tableau de bord", "▤"], ["factures", "Factures", "▦"], ["recus", "Reçus", "◈"], ["clients", "Clients", "◍"], ["departs", "Départs", "✈"], ["services", "Prestations", "✦"], ["reglages", "Réglages", "⚙"]];
+const NAV = [["dash", "Tableau de bord", "▤"], ["factures", "Factures", "▦"], ["recus", "Reçus", "◈"], ["depenses", "Dépenses", "▼"], ["clients", "Clients", "◍"], ["departs", "Départs", "✈"], ["services", "Prestations", "✦"], ["reglages", "Réglages", "⚙"]];
 const TITRES = {
   dash: ["Tableau de bord", "Activité de l'agence, encaissements et dossiers à suivre"],
   factures: ["Factures", "Émission, suivi des paiements et impression"],
   recus: ["Reçus", "Encaissements enregistrés et justificatifs remis aux clients"],
+  depenses: ["Dépenses", "Charges de l'agence, par catégorie et par mois"],
   clients: ["Clients", "Coordonnées et pièces utilisées sur les documents"],
   departs: ["Départs", "Vols et pèlerinages à venir, dossier par dossier"],
   services: ["Prestations", "Catalogue repris dans les lignes de facture"],
@@ -651,7 +664,7 @@ const TITRES = {
 function render(force) {
   if (!force && (S.view === "edit" || !document.getElementById("ov").hidden)) return;
   const nav = $("#nav");
-  nav.innerHTML = NAV.filter(([k]) => k !== "reglages" || estAdmin()).map(([k, l, i]) => '<button class="nav-b" data-act="go:' + k + '"' + (S.view === k || (k === "factures" && (S.view === "edit" || S.view === "doc")) ? ' aria-current="page"' : "") + '><span class="ic">' + i + "</span>" + l + "</button>").join("");
+  nav.innerHTML = NAV.filter(([k]) => (k !== "reglages" && k !== "depenses") || estAdmin()).map(([k, l, i]) => '<button class="nav-b" data-act="go:' + k + '"' + (S.view === k || (k === "factures" && (S.view === "edit" || S.view === "doc")) ? ' aria-current="page"' : "") + '><span class="ic">' + i + "</span>" + l + "</button>").join("");
   const a = ag();
   $("#railLogo").src = LOGO;
   $("#railFoot").innerHTML = "<strong>" + esc(a.nom) + "</strong>" + esc(a.raison || "") + "<div>" + esc(a.tel || "") + "</div><div>" + esc(a.email || "") + "</div>"
@@ -665,6 +678,7 @@ function topActions() {
   const w = !S.ro;
   if (S.view === "factures") return search() + (w ? '<button class="btn btn-p" data-act="new-fac">Nouvelle facture</button>' : "");
   if (S.view === "recus") return search() + (w ? '<button class="btn btn-p" data-act="new-rec">Nouveau reçu</button>' : "");
+  if (S.view === "depenses") return search() + (w ? '<button class="btn btn-p" data-act="new-dep">Nouvelle dépense</button>' : "");
   if (S.view === "clients") return search() + (w ? '<button class="btn btn-p" data-act="new-cli">Nouveau client</button>' : "");
   if (S.view === "services" && w) return '<button class="btn btn-p" data-act="new-srv">Nouvelle prestation</button>';
   if (S.view === "dash") return (S.canInstall && !S.standalone ? '<button class="btn btn-o" data-act="install">Installer l\'application</button>' : "") + (S.dl ? '<button class="btn" data-act="export">Exporter la comptabilité</button>' : "") + (w ? '<button class="btn btn-p" data-act="new-fac">Nouvelle facture</button>' : "");
@@ -700,6 +714,9 @@ VIEWS.dash = function () {
   const facAn = actifs.filter((f) => String(f.date || "").slice(0, 4) === an);
   const agg = (list) => list.reduce((o, f) => { const t = totaux(f); o.v += t.base; o.c += t.cout; o.m += t.marge; o.n++; return o; }, { v: 0, c: 0, m: 0, n: 0 });
   const aM = agg(facMm), aA = agg(facAn);
+  const depMain = D.depenses.filter((x) => (x.devise || main) === main);
+  aM.d = depMain.filter((x) => String(x.date || "").slice(0, 7) === mois).reduce((a, x) => a + num(x.montant), 0);
+  aA.d = depMain.filter((x) => String(x.date || "").slice(0, 4) === an).reduce((a, x) => a + num(x.montant), 0);
   const tx = (o) => (o.v > 0 ? pct(o.m / o.v * 100) : "—");
   const parts = {};
   facAn.forEach((f) => {
@@ -713,9 +730,10 @@ VIEWS.dash = function () {
   });
   const pk = Object.keys(parts).filter((k) => parts[k].v > 0 || parts[k].c > 0).sort((x, y) => parts[y].m - parts[x].m);
   const autres = D.factures.some((f) => etat(f).k !== "annulee" && (f.devise || main) !== main);
-  const ligneMg = (lab, o, strong) => "<tr><td>" + (strong ? "<strong>" + esc(lab) + "</strong>" : esc(lab)) + '</td><td class="num">' + money(o.v) + '</td><td class="num">' + money(o.c) + '</td><td class="num"' + mgCls(o.m) + "><strong>" + money(o.m) + '</strong></td><td class="num">' + (o.v > 0 ? pct(o.m / o.v * 100) : "—") + "</td></tr>";
-  const marges = '<div class="panel" style="margin-top:18px"><div class="panel-h"><h3>Marges</h3><div class="r sub2">ventes hors taxes moins prix système, remises déduites</div></div>'
-    + '<div class="tw"><table><thead><tr><th>Période</th><th class="num">Ventes HT</th><th class="num">Prix système</th><th class="num">Marge brute</th><th class="num">Taux</th></tr></thead><tbody>'
+  const ligneMg = (lab, o, strong) => "<tr><td>" + (strong ? "<strong>" + esc(lab) + "</strong>" : esc(lab)) + '</td><td class="num">' + money(o.v) + '</td><td class="num">' + money(o.c) + '</td><td class="num"' + mgCls(o.m) + "><strong>" + money(o.m) + '</strong></td><td class="num">' + (o.v > 0 ? pct(o.m / o.v * 100) : "—") + "</td>"
+    + (o.d === undefined ? "<td></td><td></td>" : '<td class="num">' + money(o.d) + '</td><td class="num"' + mgCls(o.m - o.d) + "><strong>" + money(o.m - o.d) + "</strong></td>") + "</tr>";
+  const marges = '<div class="panel" style="margin-top:18px"><div class="panel-h"><h3>Marges et résultat</h3><div class="r sub2">marge brute des factures, moins les dépenses de l\'agence</div></div>'
+    + '<div class="tw"><table><thead><tr><th>Période</th><th class="num">Ventes HT</th><th class="num">Prix système</th><th class="num">Marge brute</th><th class="num">Taux</th><th class="num">Dépenses</th><th class="num">Résultat net</th></tr></thead><tbody>'
     + ligneMg("Ce mois (" + aM.n + " facture" + (aM.n > 1 ? "s" : "") + ")", aM, true) + ligneMg("Année " + an + " (" + aA.n + " facture" + (aA.n > 1 ? "s" : "") + ")", aA, true) + "</tbody></table></div>"
     + (pk.length ? '<div class="tw" style="border-top:1px solid var(--line)"><table><thead><tr><th>Par prestation, ' + an + '</th><th class="num">Ventes HT</th><th class="num">Prix système</th><th class="num">Marge brute</th><th class="num">Taux</th></tr></thead><tbody>' + pk.map((k) => ligneMg(k, parts[k])).join("") + "</tbody></table></div>" : "")
     + (autres ? '<div class="panel-b sub2" style="border-top:1px solid var(--line-soft)">Les factures en devise étrangère sont comptées à part : ouvrez-les pour voir leur marge.</div>' : "")
@@ -787,6 +805,34 @@ VIEWS.departs = function () {
       return "<tr><td><strong>" + dfr(v.depart) + "</strong><div class=\"sub2\">" + (j === 0 ? "aujourd'hui" : j > 0 ? "dans " + j + " j" : Math.abs(j) + " j") + (v.retour ? " · retour " + dfr(v.retour) : "") + '</div></td><td>' + esc(cliOf(f).nom || "—") + '<div class="sub2">' + esc(cliOf(f).tel || "") + '</div></td><td>' + esc(trajet(v) || "—") + (v.passagers ? '<div class="sub2">' + esc(v.passagers) + "</div>" : "") + "</td><td>" + esc(v.compagnie || "—") + (v.pnr ? '<div class="sub2">' + esc(v.pnr) + "</div>" : "") + '</td><td><span class="tag ' + e.c + '">' + e.t + "</span>" + (solde(f) > 0.004 ? '<div class="sub2">solde ' + money(solde(f), f.devise) + "</div>" : "") + '</td><td><div class="rowact"><button class="btn btn-q" data-act="open-fac:' + f.id + '">Ouvrir</button></div></td></tr>';
     }).join("") + "</tbody></table></div></div>";
   return '<div class="stack">' + tbl(futur, "À venir") + tbl(passe.slice(0, 15), "Départs passés") + "</div>";
+};
+VIEWS.depenses = function () {
+  if (!estAdmin()) return '<div class="panel">' + vide("Réservé à la direction", "Le suivi des dépenses est accessible au directeur uniquement.", '<button class="btn btn-p" data-act="go:dash">Retour au tableau de bord</button>') + "</div>";
+  const main = ag().devise, mois = today().slice(0, 7), an = today().slice(0, 4);
+  const tous = D.depenses.slice().sort((x, y) => String(y.date || "").localeCompare(String(x.date || "")));
+  const rows = tous.filter((x) => match([x.libelle, x.categorie, x.beneficiaire, x.reference, x.note].join(" ")));
+  const somme = (list) => list.filter((x) => (x.devise || main) === main).reduce((a, x) => a + num(x.montant), 0);
+  const tMois = somme(tous.filter((x) => String(x.date || "").slice(0, 7) === mois));
+  const tAn = somme(tous.filter((x) => String(x.date || "").slice(0, 4) === an));
+  const parCat = {};
+  tous.filter((x) => String(x.date || "").slice(0, 4) === an && (x.devise || main) === main).forEach((x) => {
+    const k = x.categorie || "Autre dépense"; parCat[k] = (parCat[k] || 0) + num(x.montant);
+  });
+  const ck = Object.keys(parCat).filter((k) => parCat[k] > 0).sort((a, b) => parCat[b] - parCat[a]);
+  const entete = '<div class="kpis" style="margin-bottom:18px">'
+    + kpi("Dépenses de " + new Date(mois + "-02").toLocaleDateString("fr-FR", { month: "long" }), plain(tMois, main), (DEV[main] || DEV.GNF).s, tous.filter((x) => String(x.date || "").slice(0, 7) === mois).length + " écriture(s)", 1)
+    + kpi("Dépenses " + an, plain(tAn, main), (DEV[main] || DEV.GNF).s, tous.filter((x) => String(x.date || "").slice(0, 4) === an).length + " écriture(s)")
+    + kpi("Catégorie la plus lourde", ck.length ? ck[0] : "—", "", ck.length ? money(parCat[ck[0]]) : "aucune dépense saisie")
+    + kpi("Moyenne par mois", plain(tAn / Math.max(1, parseInt(today().slice(5, 7), 10)), main), (DEV[main] || DEV.GNF).s, "sur " + an)
+    + "</div>";
+  const table = rows.length
+    ? '<div class="panel"><div class="panel-h"><h3>Écritures</h3><div class="r sub2">' + rows.length + " ligne(s)</div></div><div class=\"tw\"><table><thead><tr><th>Date</th><th>Libellé</th><th>Catégorie</th><th>Bénéficiaire</th><th>Mode</th><th class=\"num\">Montant</th><th></th></tr></thead><tbody>"
+      + rows.map((x) => "<tr><td>" + dfr(x.date) + '</td><td><strong>' + esc(x.libelle || "—") + "</strong>" + (x.note ? '<div class="sub2">' + esc(x.note) + "</div>" : "") + '</td><td><span class="tag">' + esc(x.categorie || "—") + "</span></td><td>" + esc(x.beneficiaire || "—") + "</td><td>" + esc(x.mode || "—") + (x.reference ? '<div class="sub2">' + esc(x.reference) + "</div>" : "") + '</td><td class="num">' + money(x.montant, x.devise) + '</td><td><div class="rowact"><button class="btn btn-q" data-act="edit-dep:' + x.id + '">Modifier</button><button class="btn btn-q btn-d" data-act="del-dep:' + x.id + '">Supprimer</button></div></td></tr>').join("")
+      + "</tbody></table></div></div>"
+    : '<div class="panel">' + vide(S.q ? "Aucune dépense ne correspond" : "Aucune dépense enregistrée", S.q ? "Essayez un autre libellé, une catégorie ou un bénéficiaire." : "Enregistrez le loyer, les salaires, le carburant ou les frais bancaires : ils seront déduits du résultat.", '<button class="btn btn-p" data-act="new-dep">Nouvelle dépense</button>') + "</div>";
+  const cats = ck.length ? '<div class="panel"><div class="panel-h"><h3>Par catégorie, ' + an + '</h3></div><div class="tw"><table><tbody>'
+    + ck.map((k) => "<tr><td>" + esc(k) + '</td><td class="num">' + money(parCat[k]) + '</td><td class="num sub2">' + pct(parCat[k] / tAn * 100) + "</td></tr>").join("") + "</tbody></table></div></div>" : "";
+  return entete + '<div class="grid" style="gap:18px">' + table + cats + "</div>";
 };
 VIEWS.services = function () {
   const rows = srvTri();
@@ -1043,6 +1089,22 @@ function modalRecu() {
     + '<div class="grid g2"><div><label class="f" for="r_mode">Mode</label><select id="r_mode">' + MODES.map((m) => '<option value="' + esc(m) + '">' + esc(m) + "</option>").join("") + '</select></div><div><label class="f" for="r_ref">Référence</label><input id="r_ref" type="text"></div></div></div>',
     '<button class="btn" data-act="close">Annuler</button><button class="btn btn-p" data-act="ok-recu">Enregistrer le reçu</button>');
 }
+function modalDep(id) {
+  const x = id ? D.depenses.find((d) => d.id === id) || {} : {};
+  const cats = CATS.slice();
+  if (x.categorie && cats.indexOf(x.categorie) < 0) cats.unshift(x.categorie);
+  sheet(id ? "Modifier la dépense" : "Nouvelle dépense",
+    '<div class="grid g2"><div><label class="f" for="d_date">Date</label><input id="d_date" type="date" value="' + esc(x.date || today()) + '"></div>'
+    + '<div><label class="f" for="d_cat">Catégorie</label><select id="d_cat">' + cats.map((c) => '<option value="' + esc(c) + '"' + (c === x.categorie ? " selected" : "") + ">" + esc(c) + "</option>").join("") + "</select></div>"
+    + '<div style="grid-column:1/-1"><label class="f" for="d_lib">Libellé</label><input id="d_lib" type="text" value="' + esc(x.libelle || "") + '" placeholder="Loyer du mois, carburant véhicule, salaire de…"></div>'
+    + '<div><label class="f" for="d_ben">Bénéficiaire</label><input id="d_ben" type="text" value="' + esc(x.beneficiaire || "") + '"></div>'
+    + '<div><label class="f" for="d_mt">Montant</label><input id="d_mt" type="number" step="any" min="0" value="' + num(x.montant) + '"></div>'
+    + '<div><label class="f" for="d_dev">Devise</label><select id="d_dev">' + Object.keys(DEV).map((dv) => '<option value="' + dv + '"' + (dv === (x.devise || ag().devise) ? " selected" : "") + ">" + dv + "</option>").join("") + "</select></div>"
+    + '<div><label class="f" for="d_mode">Mode de paiement</label><select id="d_mode">' + MODES.map((m) => '<option value="' + esc(m) + '"' + (m === x.mode ? " selected" : "") + ">" + esc(m) + "</option>").join("") + "</select></div>"
+    + '<div style="grid-column:1/-1"><label class="f" for="d_ref">Référence ou n° de pièce</label><input id="d_ref" type="text" value="' + esc(x.reference || "") + '"></div>'
+    + '<div style="grid-column:1/-1"><label class="f" for="d_note">Note</label><input id="d_note" type="text" value="' + esc(x.note || "") + '"></div></div>',
+    '<button class="btn" data-act="close">Annuler</button><button class="btn btn-p" data-act="ok-dep:' + (id || "") + '">Enregistrer</button>');
+}
 function modalConfirm(titre, txt, act) {
   sheet(titre, '<div>' + esc(txt) + "</div>", '<button class="btn" data-act="close">Annuler</button><button class="btn btn-o" data-act="' + act + '">Confirmer</button>');
 }
@@ -1071,6 +1133,12 @@ function csvFactures() {
 function csvRecus() {
   const head = ["Numero", "Date", "Client", "Objet", "Facture", "Mode", "Reference", "Devise", "Montant"];
   const rows = D.recus.slice().sort((a, b) => String(a.numero).localeCompare(String(b.numero))).map((r) => [r.numero, r.date, (r.client || {}).nom, r.objet, r.factureNumero, r.mode, r.reference, r.devise, num(r.montant)].map(csvq).join(";"));
+  return "\ufeff" + head.map(csvq).join(";") + "\r\n" + rows.join("\r\n");
+}
+function csvDepenses() {
+  const head = ["Date", "Categorie", "Libelle", "Beneficiaire", "Mode", "Reference", "Devise", "Montant", "Note"];
+  const rows = D.depenses.slice().sort((a, b) => String(a.date).localeCompare(String(b.date)))
+    .map((x) => [x.date, x.categorie, x.libelle, x.beneficiaire, x.mode, x.reference, x.devise, num(x.montant), x.note].map(csvq).join(";"));
   return "\ufeff" + head.map(csvq).join(";") + "\r\n" + rows.join("\r\n");
 }
 function docHTML() {
@@ -1127,8 +1195,9 @@ const ACT = {
   export: () => sheet("Exporter en CSV", '<div class="sub2">Le fichier s\'ouvre dans Excel ou Google Sheets, séparateur point-virgule.</div>', '<button class="btn" data-act="exp-fac">Factures</button><button class="btn" data-act="exp-rec">Reçus</button>'),
   "exp-fac": () => { closeSheet(); save("univo-factures-" + today() + ".csv", csvFactures()); },
   "exp-rec": () => { closeSheet(); save("univo-recus-" + today() + ".csv", csvRecus()); },
+  "exp-dep": () => { closeSheet(); save("univo-depenses-" + today() + ".csv", csvDepenses()); },
 
-  "bk-json": () => save("univo-sauvegarde-" + today() + ".json", JSON.stringify({ version: 1, exporte: new Date().toISOString(), settings: ag(), clients: D.clients, services: D.services, factures: D.factures, recus: D.recus }, null, 2)),
+  "bk-json": () => save("univo-sauvegarde-" + today() + ".json", JSON.stringify({ version: 1, exporte: new Date().toISOString(), settings: ag(), clients: D.clients, services: D.services, factures: D.factures, recus: D.recus, depenses: D.depenses }, null, 2)),
   restore: () => {
     const inp = document.createElement("input");
     inp.type = "file"; inp.accept = ".json,application/json";
@@ -1140,6 +1209,19 @@ const ACT = {
     };
     inp.click();
   },
+
+  "new-dep": () => { if (!estAdmin()) return; modalDep(""); },
+  "edit-dep": (id) => { if (!estAdmin()) return; modalDep(id); },
+  "ok-dep": async (id) => {
+    const mt = num(val("d_mt")); if (mt <= 0) { toast("Indiquez le montant."); return; }
+    const lib = val("d_lib"); if (!lib) { toast("Indiquez le libellé."); return; }
+    const did = id || uid();
+    const body = { date: val("d_date") || today(), categorie: val("d_cat"), libelle: lib, beneficiaire: val("d_ben"), montant: mt, devise: val("d_dev"), mode: val("d_mode"), reference: val("d_ref"), note: val("d_note"), createdAt: new Date().toISOString() };
+    try { await put("depenses", did, body); } catch (e) { return; }
+    closeSheet(); render(true); toast(id ? "Dépense modifiée." : "Dépense enregistrée.");
+  },
+  "del-dep": (id) => { if (refusSuppr()) return; modalConfirm("Supprimer cette dépense ?", "Elle sera retirée des totaux et du résultat.", "do-del-dep:" + id); },
+  "do-del-dep": async (id) => { closeSheet(); try { await drop("depenses", id); } catch (e) { return; } render(true); toast("Dépense supprimée."); },
 
   "new-fac": () => { S.draft = newDraft(""); S.view = "edit"; render(true); },
   "new-fac-cli": (id) => { S.draft = newDraft(id); S.view = "edit"; render(true); },
@@ -1316,7 +1398,7 @@ function loadBackup(o) {
   if (!o || typeof o !== "object") { toast("Fichier illisible."); return; }
   if (S.fb) { envoyerTout(o); return; }
   if (o.settings) D.settings = o.settings;
-  ["clients", "services", "factures", "recus"].forEach((c) => { if (Array.isArray(o[c])) D[c] = o[c]; });
+  ["clients", "services", "factures", "recus", "depenses"].forEach((c) => { if (Array.isArray(o[c])) D[c] = o[c]; });
   lsave(); render(true);
   toast("Sauvegarde restaurée : " + D.factures.length + " facture(s), " + D.recus.length + " reçu(s).");
 }
@@ -1328,7 +1410,7 @@ function envoyerTout(o) {
   if (!S.db || !S.fb) return;
   const ops = [];
   if (o.settings) ops.push(["settings", "agence", o.settings]);
-  ["clients", "services", "factures", "recus"].forEach((c) => (o[c] || []).forEach((x) => {
+  ["clients", "services", "factures", "recus", "depenses"].forEach((c) => (o[c] || []).forEach((x) => {
     if (x && x.id) { const b = JSON.parse(JSON.stringify(x)); delete b.id; ops.push([c, String(x.id), b]); }
   }));
   if (!ops.length) { toast("Aucune donnée à envoyer."); return; }
