@@ -1,5 +1,5 @@
 /* UNIVO — service worker : fonctionnement hors connexion */
-const CACHE = "univo-v7";
+const CACHE = "univo-v8";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./firebase-config.js", "./icon-48.png", "./icon-96.png", "./icon-144.png", "./icon-192.png", "./icon-256.png", "./icon-512.png", "./icon-maskable-512.png", "./apple-touch-icon.png", "./favicon.png"];
 
 self.addEventListener("install", (e) => {
